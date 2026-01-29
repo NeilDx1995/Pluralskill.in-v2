@@ -1929,20 +1929,26 @@ app.add_middleware(
 async def shutdown_db_client():
     client.close()
 
-# Seed initial data on startup
+# Seed initial data on startup (only admin/trainer users, no fake content)
 @app.on_event("startup")
 async def seed_data():
     now = datetime.now(timezone.utc).isoformat()
     
-    # Seed Workshops with Industry Leaders
-    workshop_count = await db.workshops.count_documents({})
-    if workshop_count == 0:
-        logger.info("Seeding workshops...")
-        workshops = [
-            {
-                "id": str(uuid.uuid4()),
-                "title": "AI in Finance: Transforming FP&A with Machine Learning",
-                "description": "Learn how leading financial institutions are leveraging AI for forecasting, risk assessment, and automated reporting. Real case studies from top banks and fintech companies.",
+    # Create admin user if not exists
+    admin_exists = await db.users.find_one({"email": "admin@pluralskill.com"})
+    if not admin_exists:
+        logger.info("Creating admin user...")
+        admin_doc = {"id": str(uuid.uuid4()), "email": "admin@pluralskill.com", "password_hash": hash_password("admin123"), "first_name": "Admin", "last_name": "User", "bio": "Platform Administrator", "skills": [], "role": "admin", "enrolled_courses": [], "completed_labs": [], "created_at": now, "updated_at": now}
+        await db.users.insert_one(admin_doc)
+        logger.info("Admin user created")
+    
+    # Create trainer user if not exists
+    trainer_exists = await db.users.find_one({"email": "trainer@pluralskill.com"})
+    if not trainer_exists:
+        logger.info("Creating trainer user...")
+        trainer_doc = {"id": str(uuid.uuid4()), "email": "trainer@pluralskill.com", "password_hash": hash_password("trainer123"), "first_name": "Sarah", "last_name": "Trainer", "bio": "Course Instructor", "skills": ["Excel", "Power BI", "Python"], "role": "trainer", "enrolled_courses": [], "completed_labs": [], "created_at": now, "updated_at": now}
+        await db.users.insert_one(trainer_doc)
+        logger.info("Trainer user created")
                 "speakers": [
                     {"name": "Sarah Chen", "title": "VP of Data Science", "company": "Goldman Sachs", "company_logo": "https://logo.clearbit.com/goldmansachs.com", "avatar_url": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200", "linkedin": ""},
                     {"name": "Michael Torres", "title": "Head of AI Products", "company": "Stripe", "company_logo": "https://logo.clearbit.com/stripe.com", "avatar_url": "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200", "linkedin": ""}
