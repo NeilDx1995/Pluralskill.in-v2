@@ -1456,7 +1456,7 @@ async def delete_my_learning_path(path_id: str, user: dict = Depends(get_current
 
 @api_router.post("/open-source/generate")
 async def generate_learning_path(request: GeneratePathRequest, user: dict = Depends(get_current_user)):
-    """Generate an AI-powered learning path for a specific skill"""
+    """Generate an AI-powered learning path for a specific skill - requires login"""
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     
     if not EMERGENT_LLM_KEY:
@@ -1534,15 +1534,14 @@ Generate a 4-8 week roadmap with specific, real open-source resources."""
             "steps": path_data.get("steps", []),
             "created_at": now,
             "generated_by": "ai",
-            "user_id": user["id"] if user else None
+            "user_id": user["id"]  # Always store user_id
         }
         
         await db.learning_paths.insert_one(path_doc)
         if "_id" in path_doc:
             del path_doc["_id"]
         
-        if user:
-            await log_access(user["id"], "open_source", path_id, "generate")
+        await log_access(user["id"], "open_source", path_id, "generate")
         
         return path_doc
         
