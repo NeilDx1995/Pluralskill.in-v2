@@ -1420,27 +1420,42 @@ async def trainer_delete_course(course_id: str, user: dict = Depends(require_tra
 # ============== OPEN SOURCE LEARNING PATHS ==============
 
 @api_router.get("/open-source/paths")
-async def get_learning_paths(user: dict = Depends(get_optional_user)):
-    paths = await db.learning_paths.find({}, {"_id": 0}).to_list(100)
+async def get_learning_paths(user: dict = Depends(get_current_user)):
+    """Get learning paths for the current user only"""
+    # Only return paths created by this user
+    paths = await db.learning_paths.find(
+        {"user_id": user["id"]}, 
+        {"_id": 0}
+    ).to_list(100)
     
-    if user:
-        await log_access(user["id"], "open_source", "list", "view")
+    await log_access(user["id"], "open_source", "list", "view")
     
     return paths
 
 @api_router.get("/open-source/paths/{path_id}")
-async def get_learning_path(path_id: str, user: dict = Depends(get_optional_user)):
-    path = await db.learning_paths.find_one({"id": path_id}, {"_id": 0})
+async def get_learning_path(path_id: str, user: dict = Depends(get_current_user)):
+    """Get a specific learning path - only if owned by user"""
+    path = await db.learning_paths.find_one(
+        {"id": path_id, "user_id": user["id"]}, 
+        {"_id": 0}
+    )
     if not path:
         raise HTTPException(status_code=404, detail="Learning path not found")
     
-    if user:
-        await log_access(user["id"], "open_source", path_id, "view")
+    await log_access(user["id"], "open_source", path_id, "view")
     
     return path
 
+@api_router.delete("/open-source/paths/{path_id}")
+async def delete_my_learning_path(path_id: str, user: dict = Depends(get_current_user)):
+    """Delete a learning path owned by the current user"""
+    result = await db.learning_paths.delete_one({"id": path_id, "user_id": user["id"]})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Learning path not found")
+    return {"message": "Learning path deleted"}
+
 @api_router.post("/open-source/generate")
-async def generate_learning_path(request: GeneratePathRequest, user: dict = Depends(get_optional_user)):
+async def generate_learning_path(request: GeneratePathRequest, user: dict = Depends(get_current_user)):
     """Generate an AI-powered learning path for a specific skill"""
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     
