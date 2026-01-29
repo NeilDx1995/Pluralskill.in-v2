@@ -234,6 +234,17 @@ const Navbar = () => {
                     <User className="w-5 h-5" />
                     Profile
                   </Link>
+                  {isTrainerOrAdmin && (
+                    <Link
+                      to="/trainer-dashboard"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-muted"
+                      data-testid="mobile-trainer-link"
+                    >
+                      <Presentation className="w-5 h-5" />
+                      Trainer Dashboard
+                    </Link>
+                  )}
                   {isAdmin && (
                     <Link
                       to="/admin"
