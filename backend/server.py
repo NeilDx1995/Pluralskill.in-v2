@@ -2130,7 +2130,7 @@ async def seed_data():
                 "tags": ["HR", "People Analytics"],
                 "max_participants": 300,
                 "registered_count": 0,
-                "is_published": True,
+                "is_active": True,
                 "created_by": admin_id,
                 "created_at": now
             },
@@ -2146,7 +2146,7 @@ async def seed_data():
                 "tags": ["Supply Chain", "Operations"],
                 "max_participants": 400,
                 "registered_count": 0,
-                "is_published": True,
+                "is_active": True,
                 "created_by": admin_id,
                 "created_at": now
             }
