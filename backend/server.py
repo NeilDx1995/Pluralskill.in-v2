@@ -422,7 +422,8 @@ async def create_course(course_data: CourseCreate, admin: dict = Depends(require
     await db.courses.insert_one(course_doc)
     
     # Return without _id
-    del course_doc["_id"] if "_id" in course_doc else None
+    if "_id" in course_doc:
+        del course_doc["_id"]
     return course_doc
 
 @api_router.put("/admin/courses/{course_id}")
