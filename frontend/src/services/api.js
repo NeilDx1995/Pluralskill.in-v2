@@ -493,7 +493,7 @@ export const deleteLab = async (labId) => {
   return response.data;
 };
 
-export const deleteLearningPath = async (pathId) => {
+export const adminDeleteLearningPath = async (pathId) => {
   const response = await axios.delete(`${API_URL}/admin/open-source/paths/${pathId}`, {
     headers: getAuthHeader()
   });
