@@ -411,6 +411,127 @@ class PluralSkillAPITester:
             data=invalid_credentials
         )
 
+    def test_labs_endpoints(self):
+        """Test labs-related endpoints"""
+        self.log("=== Testing Labs Endpoints ===")
+        
+        # Test get labs (public)
+        success, response = self.run_test(
+            "Get Published Labs", "GET", "labs", 200
+        )
+        
+        if success and response:
+            labs = response
+            if labs:
+                # Verify lab structure
+                first_lab = labs[0]
+                required_fields = ['id', 'title', 'slug', 'description', 'technology', 'difficulty', 'steps']
+                missing_fields = [field for field in required_fields if field not in first_lab]
+                if missing_fields:
+                    self.log(f"⚠️ Lab missing fields: {missing_fields}")
+                else:
+                    self.log("✅ Lab structure validated")
+                
+                # Test get lab by slug
+                self.run_test(
+                    "Get Lab by Slug", "GET", f"labs/{first_lab['slug']}", 200
+                )
+                
+                # Test lab completion (requires user token)
+                if self.user_token:
+                    self.run_test(
+                        "Complete Lab", "POST", f"labs/{first_lab['id']}/complete", 200,
+                        token=self.user_token
+                    )
+        
+        # Test admin lab management
+        if self.admin_token:
+            self.run_test(
+                "Get All Labs (Admin)", "GET", "admin/labs", 200,
+                token=self.admin_token
+            )
+            
+            # Test create lab
+            timestamp = datetime.now().strftime("%H%M%S")
+            test_lab = {
+                "title": f"Test Lab {timestamp}",
+                "slug": f"test-lab-{timestamp}",
+                "description": "Automated test lab for API validation",
+                "short_description": "Test lab",
+                "thumbnail_url": "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800",
+                "category": "Testing",
+                "technology": "Python",
+                "difficulty": "beginner",
+                "estimated_time_minutes": 60,
+                "steps": [
+                    {
+                        "title": "Setup Environment",
+                        "description": "Set up test environment",
+                        "instructions": "Follow the setup instructions",
+                        "expected_outcome": "Environment ready",
+                        "order": 1
+                    }
+                ],
+                "is_published": True
+            }
+            
+            success, response = self.run_test(
+                "Create Lab", "POST", "admin/labs", 201,
+                data=test_lab, token=self.admin_token
+            )
+            
+            if success and 'id' in response:
+                test_lab_id = response['id']
+                
+                # Test delete lab
+                self.run_test(
+                    "Delete Lab", "DELETE", f"admin/labs/{test_lab_id}", 200,
+                    token=self.admin_token
+                )
+
+    def test_open_source_endpoints(self):
+        """Test open source learning path endpoints"""
+        self.log("=== Testing Open Source Learning Path Endpoints ===")
+        
+        # Test get learning paths
+        self.run_test(
+            "Get Learning Paths", "GET", "open-source/paths", 200
+        )
+        
+        # Test AI path generation (this is the key new feature)
+        path_request = {
+            "skill_name": "Python for Data Science",
+            "industry": "Finance & Banking",
+            "current_level": "beginner"
+        }
+        
+        success, response = self.run_test(
+            "Generate Learning Path (AI)", "POST", "open-source/generate", 200,
+            data=path_request
+        )
+        
+        if success and response:
+            # Verify generated path structure
+            required_fields = ['id', 'skill_name', 'industry', 'description', 'estimated_weeks', 'steps']
+            missing_fields = [field for field in required_fields if field not in response]
+            if missing_fields:
+                self.log(f"⚠️ Generated path missing fields: {missing_fields}")
+            else:
+                self.log("✅ Generated learning path structure validated")
+                
+                # Test get specific path
+                path_id = response['id']
+                self.run_test(
+                    "Get Learning Path by ID", "GET", f"open-source/paths/{path_id}", 200
+                )
+                
+                # Test admin delete path
+                if self.admin_token:
+                    self.run_test(
+                        "Delete Learning Path (Admin)", "DELETE", f"admin/open-source/paths/{path_id}", 200,
+                        token=self.admin_token
+                    )
+
     def run_all_tests(self):
         """Run the complete test suite"""
         self.log("🚀 Starting PluralSkill LMS API Test Suite")
