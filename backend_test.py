@@ -436,6 +436,10 @@ class PluralSkillAPITester:
         # Security tests
         self.test_authentication_security()
         
+        # New feature tests
+        self.test_labs_endpoints()
+        self.test_open_source_endpoints()
+        
         # Print summary
         self.print_summary()
         
