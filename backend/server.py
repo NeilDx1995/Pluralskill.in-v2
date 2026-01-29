@@ -846,6 +846,22 @@ async def enroll_in_course(data: EnrollRequest, user: dict = Depends(get_current
         {"$inc": {"enrolled_count": 1}}
     )
     
+    # Initialize course progress
+    now = datetime.now(timezone.utc).isoformat()
+    progress_doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "course_id": data.course_id,
+        "modules_progress": [],
+        "quiz_progress": None,
+        "overall_progress": 0,
+        "started_at": now,
+        "last_accessed": now,
+        "completed": False,
+        "completed_at": None
+    }
+    await db.course_progress.insert_one(progress_doc)
+    
     await log_access(user["id"], "course", data.course_id, "enroll")
     
     return {"message": "Successfully enrolled in course", "course_id": data.course_id}
@@ -857,7 +873,442 @@ async def get_my_courses(user: dict = Depends(get_current_user)):
         return []
     
     courses = await db.courses.find({"id": {"$in": enrolled_ids}}, {"_id": 0}).to_list(100)
+    
+    # Add progress info to each course
+    for course in courses:
+        progress = await db.course_progress.find_one(
+            {"user_id": user["id"], "course_id": course["id"]}, {"_id": 0}
+        )
+        if progress:
+            calc = await calculate_course_progress(user["id"], course["id"])
+            course["progress"] = calc["progress"]
+            course["completed"] = calc["completed"]
+        else:
+            course["progress"] = 0
+            course["completed"] = False
+    
     return courses
+
+# ============== PROGRESS TRACKING ROUTES ==============
+
+@api_router.get("/progress/{course_id}")
+async def get_course_progress(course_id: str, user: dict = Depends(get_current_user)):
+    """Get detailed progress for a course"""
+    if course_id not in user.get("enrolled_courses", []):
+        raise HTTPException(status_code=403, detail="Not enrolled in this course")
+    
+    progress = await db.course_progress.find_one(
+        {"user_id": user["id"], "course_id": course_id}, {"_id": 0}
+    )
+    
+    if not progress:
+        raise HTTPException(status_code=404, detail="Progress not found")
+    
+    # Calculate overall progress
+    calc = await calculate_course_progress(user["id"], course_id)
+    progress["overall_progress"] = calc["progress"]
+    progress["completed"] = calc["completed"]
+    
+    # Check for certificate
+    certificate = await db.certificates.find_one(
+        {"user_id": user["id"], "course_id": course_id}, {"_id": 0}
+    )
+    progress["certificate"] = certificate
+    
+    return progress
+
+@api_router.post("/progress/module/complete")
+async def mark_module_complete(data: MarkModuleCompleteRequest, user: dict = Depends(get_current_user)):
+    """Mark a module as completed"""
+    if data.course_id not in user.get("enrolled_courses", []):
+        raise HTTPException(status_code=403, detail="Not enrolled in this course")
+    
+    course = await db.courses.find_one({"id": data.course_id}, {"_id": 0})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Verify module exists
+    module_exists = any(m["id"] == data.module_id for m in course.get("modules", []))
+    if not module_exists:
+        raise HTTPException(status_code=404, detail="Module not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Update or create module progress
+    progress = await db.course_progress.find_one({"user_id": user["id"], "course_id": data.course_id})
+    
+    if progress:
+        modules_progress = progress.get("modules_progress", [])
+        existing_idx = next((i for i, m in enumerate(modules_progress) if m["module_id"] == data.module_id), None)
+        
+        if existing_idx is not None:
+            modules_progress[existing_idx]["completed"] = True
+            modules_progress[existing_idx]["completed_at"] = now
+            modules_progress[existing_idx]["time_spent_minutes"] += data.time_spent_minutes
+        else:
+            modules_progress.append({
+                "module_id": data.module_id,
+                "completed": True,
+                "completed_at": now,
+                "time_spent_minutes": data.time_spent_minutes
+            })
+        
+        await db.course_progress.update_one(
+            {"user_id": user["id"], "course_id": data.course_id},
+            {"$set": {"modules_progress": modules_progress, "last_accessed": now}}
+        )
+    
+    # Check if eligible for certificate
+    certificate = await check_and_issue_certificate(user["id"], data.course_id)
+    
+    calc = await calculate_course_progress(user["id"], data.course_id)
+    
+    return {
+        "message": "Module marked as complete",
+        "overall_progress": calc["progress"],
+        "certificate_issued": certificate is not None,
+        "certificate": certificate
+    }
+
+@api_router.post("/progress/quiz/submit")
+async def submit_quiz(data: SubmitQuizRequest, user: dict = Depends(get_current_user)):
+    """Submit quiz answers and get score"""
+    if data.course_id not in user.get("enrolled_courses", []):
+        raise HTTPException(status_code=403, detail="Not enrolled in this course")
+    
+    course = await db.courses.find_one({"id": data.course_id}, {"_id": 0})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    tests = course.get("tests", [])
+    if not tests:
+        raise HTTPException(status_code=400, detail="This course has no quiz")
+    
+    # Get current progress
+    progress = await db.course_progress.find_one({"user_id": user["id"], "course_id": data.course_id})
+    if not progress:
+        raise HTTPException(status_code=404, detail="Progress not found")
+    
+    quiz_progress = progress.get("quiz_progress") or {"quiz_id": data.course_id, "attempts": [], "best_score": 0, "passed": False}
+    
+    # Check attempt limit
+    if len(quiz_progress.get("attempts", [])) >= MAX_QUIZ_ATTEMPTS:
+        raise HTTPException(status_code=400, detail=f"Maximum {MAX_QUIZ_ATTEMPTS} attempts reached")
+    
+    # Calculate score
+    correct = 0
+    total = len(tests)
+    
+    for test in tests:
+        user_answer = data.answers.get(test["id"])
+        if user_answer is not None and user_answer == test["correct_answer"]:
+            correct += 1
+    
+    score = (correct / total * 100) if total > 0 else 0
+    passed = score >= PASS_SCORE
+    
+    now = datetime.now(timezone.utc).isoformat()
+    attempt = {
+        "attempt_number": len(quiz_progress.get("attempts", [])) + 1,
+        "score": score,
+        "answers": data.answers,
+        "submitted_at": now,
+        "passed": passed
+    }
+    
+    quiz_progress["attempts"].append(attempt)
+    quiz_progress["best_score"] = max(quiz_progress.get("best_score", 0), score)
+    quiz_progress["passed"] = quiz_progress.get("passed", False) or passed
+    
+    await db.course_progress.update_one(
+        {"user_id": user["id"], "course_id": data.course_id},
+        {"$set": {"quiz_progress": quiz_progress, "last_accessed": now}}
+    )
+    
+    # Check if eligible for certificate
+    certificate = await check_and_issue_certificate(user["id"], data.course_id) if passed else None
+    
+    attempts_remaining = MAX_QUIZ_ATTEMPTS - len(quiz_progress["attempts"])
+    
+    return {
+        "score": score,
+        "passed": passed,
+        "correct_answers": correct,
+        "total_questions": total,
+        "best_score": quiz_progress["best_score"],
+        "attempts_remaining": attempts_remaining,
+        "certificate_issued": certificate is not None,
+        "certificate": certificate
+    }
+
+# ============== FILE UPLOAD ROUTES ==============
+
+@api_router.post("/upload/video")
+async def upload_video(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_trainer_or_admin)
+):
+    """Upload a video file for course modules"""
+    if file.content_type not in ALLOWED_VIDEO_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {ALLOWED_VIDEO_TYPES}")
+    
+    # Check file size
+    file.file.seek(0, 2)  # Seek to end
+    size = file.file.tell()
+    file.file.seek(0)  # Reset
+    
+    if size > MAX_VIDEO_SIZE:
+        raise HTTPException(status_code=400, detail=f"File too large. Max size: {MAX_VIDEO_SIZE // (1024*1024)}MB")
+    
+    # Generate unique filename
+    ext = Path(file.filename).suffix
+    unique_name = f"{uuid.uuid4()}{ext}"
+    file_path = UPLOAD_DIR / "videos" / unique_name
+    
+    # Save file
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    file_url = f"/uploads/videos/{unique_name}"
+    
+    logger.info(f"Video uploaded: {file_url} by user {user['id']}")
+    
+    return {
+        "url": file_url,
+        "filename": file.filename,
+        "size": size,
+        "content_type": file.content_type
+    }
+
+@api_router.post("/upload/document")
+async def upload_document(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_trainer_or_admin)
+):
+    """Upload a document file for course materials"""
+    if file.content_type not in ALLOWED_DOC_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: PDF, PPTX, DOCX")
+    
+    file.file.seek(0, 2)
+    size = file.file.tell()
+    file.file.seek(0)
+    
+    if size > MAX_DOC_SIZE:
+        raise HTTPException(status_code=400, detail=f"File too large. Max size: {MAX_DOC_SIZE // (1024*1024)}MB")
+    
+    ext = Path(file.filename).suffix
+    unique_name = f"{uuid.uuid4()}{ext}"
+    file_path = UPLOAD_DIR / "documents" / unique_name
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    file_url = f"/uploads/documents/{unique_name}"
+    
+    return {
+        "url": file_url,
+        "filename": file.filename,
+        "size": size,
+        "content_type": file.content_type
+    }
+
+# ============== ASSIGNMENT ROUTES ==============
+
+@api_router.get("/courses/{course_id}/assignments")
+async def get_course_assignments(course_id: str, user: dict = Depends(get_current_user)):
+    """Get all assignments for a course"""
+    assignments = await db.assignments.find({"course_id": course_id}, {"_id": 0}).to_list(100)
+    
+    # Add submission status for current user
+    for assignment in assignments:
+        submission = await db.submissions.find_one(
+            {"assignment_id": assignment["id"], "user_id": user["id"]}, {"_id": 0}
+        )
+        assignment["submission"] = submission
+    
+    return assignments
+
+@api_router.post("/assignments")
+async def create_assignment(data: AssignmentCreate, user: dict = Depends(require_trainer_or_admin)):
+    """Create a new assignment for a course"""
+    course = await db.courses.find_one({"id": data.course_id})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Trainers can only add to their own courses
+    if user["role"] == "trainer" and course.get("created_by") != user["id"]:
+        raise HTTPException(status_code=403, detail="You can only add assignments to your own courses")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    assignment_doc = {
+        "id": str(uuid.uuid4()),
+        **data.model_dump(),
+        "created_at": now,
+        "created_by": user["id"]
+    }
+    
+    await db.assignments.insert_one(assignment_doc)
+    del assignment_doc["_id"] if "_id" in assignment_doc else None
+    
+    return assignment_doc
+
+@api_router.delete("/assignments/{assignment_id}")
+async def delete_assignment(assignment_id: str, user: dict = Depends(require_trainer_or_admin)):
+    """Delete an assignment"""
+    assignment = await db.assignments.find_one({"id": assignment_id})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    
+    if user["role"] == "trainer" and assignment.get("created_by") != user["id"]:
+        raise HTTPException(status_code=403, detail="You can only delete your own assignments")
+    
+    await db.assignments.delete_one({"id": assignment_id})
+    return {"message": "Assignment deleted"}
+
+@api_router.post("/assignments/{assignment_id}/submit")
+async def submit_assignment(
+    assignment_id: str,
+    notes: str = Form(""),
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user)
+):
+    """Submit an assignment with file upload"""
+    assignment = await db.assignments.find_one({"id": assignment_id}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    
+    # Check if user is enrolled in the course
+    if assignment["course_id"] not in user.get("enrolled_courses", []):
+        raise HTTPException(status_code=403, detail="Not enrolled in this course")
+    
+    # Check for existing submission
+    existing = await db.submissions.find_one({"assignment_id": assignment_id, "user_id": user["id"]})
+    if existing:
+        raise HTTPException(status_code=400, detail="Assignment already submitted. Contact instructor to resubmit.")
+    
+    # Save file
+    ext = Path(file.filename).suffix
+    unique_name = f"{uuid.uuid4()}{ext}"
+    file_path = UPLOAD_DIR / "assignments" / unique_name
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    file_url = f"/uploads/assignments/{unique_name}"
+    
+    now = datetime.now(timezone.utc).isoformat()
+    submission_doc = {
+        "id": str(uuid.uuid4()),
+        "assignment_id": assignment_id,
+        "user_id": user["id"],
+        "file_url": file_url,
+        "file_name": file.filename,
+        "notes": notes,
+        "submitted_at": now,
+        "grade": None,
+        "feedback": None,
+        "graded_at": None,
+        "graded_by": None
+    }
+    
+    await db.submissions.insert_one(submission_doc)
+    del submission_doc["_id"] if "_id" in submission_doc else None
+    
+    return submission_doc
+
+@api_router.get("/assignments/{assignment_id}/submissions")
+async def get_assignment_submissions(assignment_id: str, user: dict = Depends(require_trainer_or_admin)):
+    """Get all submissions for an assignment (trainer/admin only)"""
+    assignment = await db.assignments.find_one({"id": assignment_id})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    
+    if user["role"] == "trainer" and assignment.get("created_by") != user["id"]:
+        raise HTTPException(status_code=403, detail="You can only view submissions for your own assignments")
+    
+    submissions = await db.submissions.find({"assignment_id": assignment_id}, {"_id": 0}).to_list(100)
+    
+    # Add user info to each submission
+    for sub in submissions:
+        sub_user = await db.users.find_one({"id": sub["user_id"]}, {"_id": 0, "password_hash": 0})
+        if sub_user:
+            sub["user_name"] = f"{sub_user['first_name']} {sub_user['last_name']}"
+            sub["user_email"] = sub_user["email"]
+    
+    return submissions
+
+@api_router.put("/submissions/{submission_id}/grade")
+async def grade_submission(submission_id: str, data: GradeSubmission, user: dict = Depends(require_trainer_or_admin)):
+    """Grade an assignment submission"""
+    submission = await db.submissions.find_one({"id": submission_id})
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    
+    assignment = await db.assignments.find_one({"id": submission["assignment_id"]})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    
+    if user["role"] == "trainer" and assignment.get("created_by") != user["id"]:
+        raise HTTPException(status_code=403, detail="You can only grade submissions for your own assignments")
+    
+    if data.grade < 0 or data.grade > assignment.get("max_score", 100):
+        raise HTTPException(status_code=400, detail=f"Grade must be between 0 and {assignment.get('max_score', 100)}")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    await db.submissions.update_one(
+        {"id": submission_id},
+        {"$set": {
+            "grade": data.grade,
+            "feedback": data.feedback,
+            "graded_at": now,
+            "graded_by": user["id"]
+        }}
+    )
+    
+    # Check if student now qualifies for certificate
+    student_id = submission["user_id"]
+    course_id = assignment["course_id"]
+    certificate = await check_and_issue_certificate(student_id, course_id)
+    
+    updated = await db.submissions.find_one({"id": submission_id}, {"_id": 0})
+    updated["certificate_issued"] = certificate is not None
+    
+    return updated
+
+# ============== CERTIFICATE ROUTES ==============
+
+@api_router.get("/certificates")
+async def get_my_certificates(user: dict = Depends(get_current_user)):
+    """Get all certificates for current user"""
+    certificates = await db.certificates.find({"user_id": user["id"]}, {"_id": 0}).to_list(100)
+    return certificates
+
+@api_router.get("/certificates/{certificate_id}")
+async def get_certificate(certificate_id: str, user: dict = Depends(get_optional_user)):
+    """Get certificate details - public for verification"""
+    certificate = await db.certificates.find_one(
+        {"$or": [{"id": certificate_id}, {"certificate_number": certificate_id}]},
+        {"_id": 0}
+    )
+    if not certificate:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+    return certificate
+
+@api_router.get("/certificates/verify/{certificate_number}")
+async def verify_certificate(certificate_number: str):
+    """Verify a certificate by its number - public endpoint"""
+    certificate = await db.certificates.find_one({"certificate_number": certificate_number}, {"_id": 0})
+    if not certificate:
+        return {"valid": False, "message": "Certificate not found"}
+    
+    return {
+        "valid": True,
+        "certificate_number": certificate["certificate_number"],
+        "user_name": certificate["user_name"],
+        "course_title": certificate["course_title"],
+        "issued_at": certificate["issued_at"],
+        "quiz_score": certificate["quiz_score"]
+    }
 
 # Trainer Course Management
 @api_router.get("/trainer/courses")
