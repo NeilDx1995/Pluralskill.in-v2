@@ -135,12 +135,6 @@ const LoginPage = () => {
               </form>
             </CardContent>
           </Card>
-
-          {/* Demo credentials */}
-          <div className="text-center text-sm text-muted-foreground bg-slate-50 rounded-lg p-4">
-            <p className="font-medium mb-1">Demo Admin Account:</p>
-            <p>admin@pluralskill.com / admin123</p>
-          </div>
         </div>
       </div>
 
