@@ -685,7 +685,7 @@ const TrainerDashboard = () => {
               <DialogDescription>Build your course with modules, videos, and quizzes</DialogDescription>
             </DialogHeader>
             
-            <Accordion type="single" collapsible defaultValue="basic" className="w-full">
+            <Accordion type="multiple" defaultValue={["basic", "modules", "tests"]} className="w-full">
               {/* Basic Info */}
               <AccordionItem value="basic">
                 <AccordionTrigger>
