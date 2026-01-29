@@ -100,6 +100,8 @@ export const AuthProvider = ({ children }) => {
     updateUser,
     isAuthenticated: !!user,
     isAdmin: user?.role === 'admin',
+    isTrainer: user?.role === 'trainer',
+    isTrainerOrAdmin: user?.role === 'admin' || user?.role === 'trainer',
     api
   };
 
