@@ -153,6 +153,141 @@ export const changePassword = async (currentPassword, newPassword) => {
   return response.data;
 };
 
+// ============== PROGRESS TRACKING APIs ==============
+
+export const getCourseProgress = async (courseId) => {
+  const response = await axios.get(`${API_URL}/progress/${courseId}`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const markModuleComplete = async (courseId, moduleId, timeSpentMinutes = 0) => {
+  const response = await axios.post(
+    `${API_URL}/progress/module/complete`,
+    { course_id: courseId, module_id: moduleId, time_spent_minutes: timeSpentMinutes },
+    { headers: getAuthHeader() }
+  );
+  return response.data;
+};
+
+export const submitQuiz = async (courseId, answers) => {
+  const response = await axios.post(
+    `${API_URL}/progress/quiz/submit`,
+    { course_id: courseId, answers },
+    { headers: getAuthHeader() }
+  );
+  return response.data;
+};
+
+// ============== FILE UPLOAD APIs ==============
+
+export const uploadVideo = async (file, onProgress) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const response = await axios.post(`${API_URL}/upload/video`, formData, {
+    headers: {
+      ...getAuthHeader(),
+      'Content-Type': 'multipart/form-data'
+    },
+    onUploadProgress: (progressEvent) => {
+      if (onProgress) {
+        const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        onProgress(percent);
+      }
+    }
+  });
+  return response.data;
+};
+
+export const uploadDocument = async (file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const response = await axios.post(`${API_URL}/upload/document`, formData, {
+    headers: {
+      ...getAuthHeader(),
+      'Content-Type': 'multipart/form-data'
+    }
+  });
+  return response.data;
+};
+
+// ============== ASSIGNMENT APIs ==============
+
+export const getCourseAssignments = async (courseId) => {
+  const response = await axios.get(`${API_URL}/courses/${courseId}/assignments`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const createAssignment = async (data) => {
+  const response = await axios.post(`${API_URL}/assignments`, data, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const deleteAssignment = async (assignmentId) => {
+  const response = await axios.delete(`${API_URL}/assignments/${assignmentId}`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const submitAssignment = async (assignmentId, file, notes = '') => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('notes', notes);
+  
+  const response = await axios.post(`${API_URL}/assignments/${assignmentId}/submit`, formData, {
+    headers: {
+      ...getAuthHeader(),
+      'Content-Type': 'multipart/form-data'
+    }
+  });
+  return response.data;
+};
+
+export const getAssignmentSubmissions = async (assignmentId) => {
+  const response = await axios.get(`${API_URL}/assignments/${assignmentId}/submissions`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const gradeSubmission = async (submissionId, grade, feedback = '') => {
+  const response = await axios.put(
+    `${API_URL}/submissions/${submissionId}/grade`,
+    { grade, feedback },
+    { headers: getAuthHeader() }
+  );
+  return response.data;
+};
+
+// ============== CERTIFICATE APIs ==============
+
+export const getMyCertificates = async () => {
+  const response = await axios.get(`${API_URL}/certificates`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const getCertificate = async (certificateId) => {
+  const response = await axios.get(`${API_URL}/certificates/${certificateId}`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const verifyCertificate = async (certificateNumber) => {
+  const response = await axios.get(`${API_URL}/certificates/verify/${certificateNumber}`);
+  return response.data;
+};
+
 // ============== TRAINER APIs ==============
 
 export const getTrainerCourses = async () => {
