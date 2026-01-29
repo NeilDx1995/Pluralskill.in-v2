@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 class PluralSkillAPITester:
-    def __init__(self, base_url: str = "https://course-hub-93.preview.emergentagent.com"):
+    def __init__(self, base_url: str = "https://pluralskill-lms.preview.emergentagent.com"):
         self.base_url = base_url
         self.admin_token = None
         self.user_token = None
