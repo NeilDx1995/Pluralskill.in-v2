@@ -1044,6 +1044,46 @@ async def submit_quiz(data: SubmitQuizRequest, user: dict = Depends(get_current_
 
 # ============== FILE UPLOAD ROUTES ==============
 
+# Create images directory
+(UPLOAD_DIR / "images").mkdir(exist_ok=True)
+
+ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
+
+@api_router.post("/upload/image")
+async def upload_image(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_trainer_or_admin)
+):
+    """Upload an image file for course/workshop banners"""
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: JPEG, PNG, WebP, GIF")
+    
+    file.file.seek(0, 2)
+    size = file.file.tell()
+    file.file.seek(0)
+    
+    if size > MAX_IMAGE_SIZE:
+        raise HTTPException(status_code=400, detail=f"File too large. Max size: {MAX_IMAGE_SIZE // (1024*1024)}MB")
+    
+    ext = Path(file.filename).suffix
+    unique_name = f"{uuid.uuid4()}{ext}"
+    file_path = UPLOAD_DIR / "images" / unique_name
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    file_url = f"/uploads/images/{unique_name}"
+    
+    logger.info(f"Image uploaded: {file_url} by user {user['id']}")
+    
+    return {
+        "url": file_url,
+        "filename": file.filename,
+        "size": size,
+        "content_type": file.content_type
+    }
+
 @api_router.post("/upload/video")
 async def upload_video(
     file: UploadFile = File(...),
