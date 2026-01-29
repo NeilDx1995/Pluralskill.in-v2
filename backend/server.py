@@ -1929,24 +1929,250 @@ app.add_middleware(
 async def shutdown_db_client():
     client.close()
 
-# Seed initial data on startup (only admin/trainer users, no fake content)
+# Seed initial data on startup
 @app.on_event("startup")
 async def seed_data():
     now = datetime.now(timezone.utc).isoformat()
     
-    # Create admin user if not exists
-    admin_exists = await db.users.find_one({"email": "admin@pluralskill.com"})
-    if not admin_exists:
+    # Get or create admin user
+    admin_user = await db.users.find_one({"email": "admin@pluralskill.com"})
+    if not admin_user:
         logger.info("Creating admin user...")
-        admin_doc = {"id": str(uuid.uuid4()), "email": "admin@pluralskill.com", "password_hash": hash_password("admin123"), "first_name": "Admin", "last_name": "User", "bio": "Platform Administrator", "skills": [], "role": "admin", "enrolled_courses": [], "completed_labs": [], "created_at": now, "updated_at": now}
-        await db.users.insert_one(admin_doc)
+        admin_user = {"id": str(uuid.uuid4()), "email": "admin@pluralskill.com", "password_hash": hash_password("admin123"), "first_name": "Admin", "last_name": "User", "bio": "Platform Administrator", "skills": [], "role": "admin", "enrolled_courses": [], "completed_labs": [], "created_at": now, "updated_at": now}
+        await db.users.insert_one(admin_user)
         logger.info("Admin user created")
+    admin_id = admin_user["id"]
     
-    # Create trainer user if not exists
-    trainer_exists = await db.users.find_one({"email": "trainer@pluralskill.com"})
-    if not trainer_exists:
+    # Get or create trainer user
+    trainer_user = await db.users.find_one({"email": "trainer@pluralskill.com"})
+    if not trainer_user:
         logger.info("Creating trainer user...")
-        trainer_doc = {"id": str(uuid.uuid4()), "email": "trainer@pluralskill.com", "password_hash": hash_password("trainer123"), "first_name": "Sarah", "last_name": "Trainer", "bio": "Course Instructor", "skills": ["Excel", "Power BI", "Python"], "role": "trainer", "enrolled_courses": [], "completed_labs": [], "created_at": now, "updated_at": now}
-        await db.users.insert_one(trainer_doc)
+        trainer_user = {"id": str(uuid.uuid4()), "email": "trainer@pluralskill.com", "password_hash": hash_password("trainer123"), "first_name": "Sarah", "last_name": "Trainer", "bio": "Course Instructor", "skills": ["Excel", "Power BI", "Python"], "role": "trainer", "enrolled_courses": [], "completed_labs": [], "created_at": now, "updated_at": now}
+        await db.users.insert_one(trainer_user)
         logger.info("Trainer user created")
+    
+    # Seed Workshops (created by admin)
+    workshop_count = await db.workshops.count_documents({})
+    if workshop_count == 0:
+        logger.info("Seeding workshops...")
+        workshops = [
+            {
+                "id": str(uuid.uuid4()),
+                "title": "AI in Finance: Transforming FP&A with Machine Learning",
+                "description": "Learn how leading financial institutions are leveraging AI for forecasting, risk assessment, and automated reporting.",
+                "leader": "Sarah Chen",
+                "company": "Goldman Sachs",
+                "date": "2026-02-15",
+                "image_url": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800",
+                "recording_url": "",
+                "tags": ["Finance", "AI", "Machine Learning"],
+                "max_participants": 500,
+                "registered_count": 0,
+                "is_published": True,
+                "created_by": admin_id,
+                "created_at": now
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "title": "Building Data-Driven HR: From Analytics to Action",
+                "description": "Industry leaders share how they use people analytics to drive retention and strategic workforce planning.",
+                "leader": "Jennifer Williams",
+                "company": "Microsoft",
+                "date": "2026-02-22",
+                "image_url": "https://images.unsplash.com/photo-1552664730-d307ca884978?w=800",
+                "recording_url": "",
+                "tags": ["HR", "People Analytics"],
+                "max_participants": 300,
+                "registered_count": 0,
+                "is_published": True,
+                "created_by": admin_id,
+                "created_at": now
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "title": "Supply Chain Resilience: Lessons from Industry Leaders",
+                "description": "Executives discuss how they built resilient supply chains using data analytics and AI.",
+                "leader": "David Kim",
+                "company": "Amazon",
+                "date": "2026-03-01",
+                "image_url": "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800",
+                "recording_url": "",
+                "tags": ["Supply Chain", "Operations"],
+                "max_participants": 400,
+                "registered_count": 0,
+                "is_published": True,
+                "created_by": admin_id,
+                "created_at": now
+            }
+        ]
+        await db.workshops.insert_many(workshops)
+        logger.info(f"Seeded {len(workshops)} workshops")
+    
+    # Seed Courses (created by admin)
+    course_count = await db.courses.count_documents({})
+    if course_count == 0:
+        logger.info("Seeding courses...")
+        courses = [
+            {
+                "id": str(uuid.uuid4()),
+                "title": "Finance & FP&A Essentials",
+                "slug": "finance-fpa-essentials",
+                "description": "Master financial planning and analysis with hands-on Excel modeling and Power BI dashboards.",
+                "short_description": "Model P&L statements, forecast cash flow, and analyze budget variance.",
+                "thumbnail_url": "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=800",
+                "category": "Finance",
+                "industry": "Financial Services",
+                "level": "intermediate",
+                "duration_hours": 25,
+                "price": 0,
+                "modules": [
+                    {"id": "m1", "title": "Financial Modeling Fundamentals", "description": "Build your first P&L model", "duration_minutes": 90, "video_url": "", "order": 1},
+                    {"id": "m2", "title": "Cash Flow Forecasting", "description": "Learn to predict and manage cash flows", "duration_minutes": 120, "video_url": "", "order": 2},
+                    {"id": "m3", "title": "Budget Variance Analysis", "description": "Compare actual vs budgeted performance", "duration_minutes": 90, "video_url": "", "order": 3}
+                ],
+                "tests": [
+                    {"id": "q1", "question": "What is the primary purpose of a P&L statement?", "options": ["Track daily transactions", "Show profitability over a period", "Calculate tax liability", "Record inventory levels"], "correct_answer": 1, "explanation": "A P&L statement shows revenues and expenses over a specific period."},
+                    {"id": "q2", "question": "In variance analysis, a favorable variance occurs when:", "options": ["Actual costs exceed budget", "Actual revenue is less than budget", "Actual results are better than budget", "Budget equals actual"], "correct_answer": 2, "explanation": "A favorable variance means actual results exceeded expectations."}
+                ],
+                "learning_outcomes": ["Build financial models", "Create dashboards", "Analyze variances"],
+                "is_published": True,
+                "enrolled_count": 0,
+                "created_by": admin_id,
+                "created_at": now,
+                "updated_at": now
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "title": "HR Analytics Masterclass",
+                "slug": "hr-analytics-masterclass",
+                "description": "Transform HR data into actionable insights using Excel and Power BI.",
+                "short_description": "Attrition prediction, performance metrics, diversity analytics.",
+                "thumbnail_url": "https://images.unsplash.com/photo-1552664730-d307ca884978?w=800",
+                "category": "Human Resources",
+                "industry": "HR & People Operations",
+                "level": "beginner",
+                "duration_hours": 20,
+                "price": 0,
+                "modules": [
+                    {"id": "m1", "title": "Introduction to HR Analytics", "description": "Overview of HR metrics", "duration_minutes": 60, "video_url": "", "order": 1},
+                    {"id": "m2", "title": "Employee Attrition Analysis", "description": "Predict and prevent turnover", "duration_minutes": 90, "video_url": "", "order": 2}
+                ],
+                "tests": [],
+                "learning_outcomes": ["Analyze HR data", "Build HR dashboards"],
+                "is_published": True,
+                "enrolled_count": 0,
+                "created_by": admin_id,
+                "created_at": now,
+                "updated_at": now
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "title": "Power BI Complete Guide",
+                "slug": "power-bi-complete-guide",
+                "description": "Comprehensive Power BI course from basics to advanced DAX formulas.",
+                "short_description": "Data modeling, DAX formulas, interactive dashboards.",
+                "thumbnail_url": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800",
+                "category": "Business Intelligence",
+                "industry": "Cross-Industry",
+                "level": "beginner",
+                "duration_hours": 35,
+                "price": 0,
+                "modules": [
+                    {"id": "m1", "title": "Getting Started with Power BI", "description": "Installation and basics", "duration_minutes": 45, "video_url": "", "order": 1},
+                    {"id": "m2", "title": "Data Modeling", "description": "Build star schemas", "duration_minutes": 120, "video_url": "", "order": 2},
+                    {"id": "m3", "title": "DAX Fundamentals", "description": "Essential DAX functions", "duration_minutes": 150, "video_url": "", "order": 3}
+                ],
+                "tests": [],
+                "learning_outcomes": ["Master Power BI", "Write DAX formulas"],
+                "is_published": True,
+                "enrolled_count": 0,
+                "created_by": admin_id,
+                "created_at": now,
+                "updated_at": now
+            }
+        ]
+        await db.courses.insert_many(courses)
+        logger.info(f"Seeded {len(courses)} courses")
+    
+    # Seed Interactive Labs (created by admin)
+    lab_count = await db.labs.count_documents({})
+    if lab_count == 0:
+        logger.info("Seeding labs...")
+        labs = [
+            {
+                "id": str(uuid.uuid4()),
+                "title": "Python Data Pipeline Lab",
+                "slug": "python-data-pipeline",
+                "description": "Build a complete data pipeline in Python - from CSV ingestion to dashboard visualization.",
+                "short_description": "End-to-end data pipeline with Python, Pandas, SQLite.",
+                "thumbnail_url": "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800",
+                "category": "Data Engineering",
+                "technology": "Python",
+                "difficulty": "intermediate",
+                "estimated_time_minutes": 120,
+                "steps": [
+                    {"id": "s1", "title": "Environment Setup", "description": "Set up your Python environment", "instructions": "Install the required packages using pip.", "code_template": "pip install pandas sqlite3 matplotlib", "expected_output": "Successfully installed packages", "hints": ["Use pip install", "Check Python version"], "order": 1},
+                    {"id": "s2", "title": "Load CSV Data", "description": "Read CSV file into a DataFrame", "instructions": "Use pandas to read the sales data CSV file.", "code_template": "import pandas as pd\n\n# Load the CSV file\ndf = pd.read_csv('sales_data.csv')\nprint(df.head())", "expected_output": "DataFrame with sales data", "hints": ["Use pd.read_csv()", "Check file path"], "order": 2},
+                    {"id": "s3", "title": "Data Cleaning", "description": "Clean and transform the data", "instructions": "Handle missing values and convert data types.", "code_template": "# Remove missing values\ndf = df.dropna()\n\n# Convert date column\ndf['date'] = pd.to_datetime(df['date'])\nprint(df.info())", "expected_output": "Clean DataFrame with correct types", "hints": ["Use dropna()", "Use pd.to_datetime()"], "order": 3},
+                    {"id": "s4", "title": "Create SQLite Database", "description": "Store data in SQLite", "instructions": "Create a database and insert the cleaned data.", "code_template": "import sqlite3\n\nconn = sqlite3.connect('sales.db')\ndf.to_sql('sales', conn, if_exists='replace')\nprint('Data saved to database')", "expected_output": "Data saved to sales.db", "hints": ["Use sqlite3.connect()", "Use to_sql()"], "order": 4}
+                ],
+                "prerequisites": ["Basic Python", "Understanding of DataFrames"],
+                "skills_gained": ["Pandas", "SQLite", "Data pipelines"],
+                "is_published": True,
+                "is_interactive": True,
+                "completions_count": 0,
+                "created_by": admin_id,
+                "created_at": now
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "title": "Excel VBA Financial Dashboard",
+                "slug": "excel-vba-dashboard",
+                "description": "Build an automated financial reporting dashboard with Excel VBA macros.",
+                "short_description": "VBA macros for automated financial reports.",
+                "thumbnail_url": "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=800",
+                "category": "Finance",
+                "technology": "Excel VBA",
+                "difficulty": "intermediate",
+                "estimated_time_minutes": 150,
+                "steps": [
+                    {"id": "s1", "title": "Enable Developer Tab", "description": "Set up Excel for VBA development", "instructions": "Go to File > Options > Customize Ribbon > Enable Developer tab", "code_template": "", "expected_output": "Developer tab visible", "hints": ["Check Excel Options"], "order": 1},
+                    {"id": "s2", "title": "Create First Macro", "description": "Write your first VBA macro", "instructions": "Open VBA editor and create a simple macro.", "code_template": "Sub FormatReport()\n    ' Format the header row\n    Range(\"A1:E1\").Font.Bold = True\n    Range(\"A1:E1\").Interior.Color = RGB(0, 112, 192)\nEnd Sub", "expected_output": "Formatted header row", "hints": ["Use Alt+F11 to open VBA editor"], "order": 2}
+                ],
+                "prerequisites": ["Excel intermediate"],
+                "skills_gained": ["VBA programming", "Excel automation"],
+                "is_published": True,
+                "is_interactive": True,
+                "completions_count": 0,
+                "created_by": admin_id,
+                "created_at": now
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "title": "SQL for Data Analysis",
+                "slug": "sql-data-analysis",
+                "description": "Master SQL queries for business intelligence and data analysis.",
+                "short_description": "SELECT, JOIN, GROUP BY, window functions.",
+                "thumbnail_url": "https://images.unsplash.com/photo-1544383835-bda2bc66a55d?w=800",
+                "category": "Data Analysis",
+                "technology": "SQL",
+                "difficulty": "beginner",
+                "estimated_time_minutes": 90,
+                "steps": [
+                    {"id": "s1", "title": "Basic SELECT Queries", "description": "Retrieve data from tables", "instructions": "Write SELECT statements to fetch data.", "code_template": "SELECT * FROM employees\nWHERE department = 'Sales'\nORDER BY hire_date DESC;", "expected_output": "List of sales employees", "hints": ["Use WHERE for filtering"], "order": 1},
+                    {"id": "s2", "title": "JOIN Operations", "description": "Combine data from multiple tables", "instructions": "Use JOIN to link employees with departments.", "code_template": "SELECT e.name, d.department_name, e.salary\nFROM employees e\nJOIN departments d ON e.dept_id = d.id;", "expected_output": "Employee list with department names", "hints": ["Use table aliases"], "order": 2},
+                    {"id": "s3", "title": "Aggregations", "description": "Summarize data with GROUP BY", "instructions": "Calculate totals and averages per department.", "code_template": "SELECT department, \n       COUNT(*) as employee_count,\n       AVG(salary) as avg_salary\nFROM employees\nGROUP BY department;", "expected_output": "Department summary statistics", "hints": ["Use aggregate functions"], "order": 3}
+                ],
+                "prerequisites": ["None - beginner friendly"],
+                "skills_gained": ["SQL queries", "Data analysis"],
+                "is_published": True,
+                "is_interactive": True,
+                "completions_count": 0,
+                "created_by": admin_id,
+                "created_at": now
+            }
+        ]
+        await db.labs.insert_many(labs)
+        logger.info(f"Seeded {len(labs)} labs")
+
 
