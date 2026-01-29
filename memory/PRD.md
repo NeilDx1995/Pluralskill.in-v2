@@ -1,24 +1,26 @@
-# PluralSkill LMS v3 - Product Requirements Document
+# PluralSkill LMS v4 - Product Requirements Document
 
 ## Original Problem Statement
-Build PluralSkill v3 - an enhanced online learning platform with:
+Build PluralSkill v4 - an enhanced online learning platform with:
 1. **Workshops** (first priority) - Led by industry leaders from top organizations
 2. **Open Source** - AI-powered learning roadmaps for industry-specific skills
 3. **Courses** - Curriculum-based with videos, tests, and industry focus
 4. **Labs** - Simulation-based learning with guided step-by-step practice
 5. **Role-Based Access Control** - Admin, Trainer, and Learner roles with distinct permissions
+6. **LMS Features** - Progress tracking, quizzes, assignments, auto certificates
 
 ## Architecture
 - **Frontend**: React 18 with React Router, ShadCN/UI components, Tailwind CSS
 - **Backend**: FastAPI (Python) with JWT authentication & RBAC
 - **Database**: MongoDB with Motor (async driver)
 - **AI Integration**: OpenAI GPT-5.2 via Emergent LLM key for learning path generation
+- **File Storage**: Local server storage for videos, documents, assignments, certificates
 - **Styling**: Custom design system (Indigo + Acid Lime theme, Outfit + Manrope fonts)
 - **Authentication**: JWT tokens with role claims (admin, trainer, learner)
 
 ## User Personas
-1. **Learner**: Professionals seeking industry-specific skills (Finance, HR, Retail, Supply Chain) - view-only access to content
-2. **Trainer**: Content creators who can create and manage their own courses, labs, and workshops
+1. **Learner**: Professionals seeking industry-specific skills (Finance, HR, Retail, Supply Chain) - view-only access to content, can enroll in courses, complete modules, take quizzes, submit assignments, earn certificates
+2. **Trainer**: Content creators who can create and manage their own courses, labs, and workshops, upload videos/documents, create assignments, grade submissions
 3. **Admin**: Platform administrators with full analytics, user management, and content oversight
 
 ## Core Requirements (Static)
@@ -31,7 +33,43 @@ Build PluralSkill v3 - an enhanced online learning platform with:
 
 ## What's Been Implemented
 
-### RBAC System (Jan 29, 2026 - Latest)
+### LMS Learning System (Jan 29, 2026 - Latest)
+- [x] **Progress Tracking**: Track module completion per student
+  - `/api/progress/{course_id}` - Get detailed progress
+  - `/api/progress/module/complete` - Mark module as complete
+  - Automatic progress calculation (modules + quiz + assignments)
+- [x] **Quiz System**: 80% pass threshold with retry
+  - `/api/progress/quiz/submit` - Submit quiz answers
+  - Max 2 attempts (initial + 1 retry)
+  - Score calculation and pass/fail tracking
+- [x] **File Uploads**: Local storage for course materials
+  - `/api/upload/video` - Upload videos (max 500MB)
+  - `/api/upload/document` - Upload PDFs, PPTX, DOCX (max 50MB)
+  - Trainers and admins only
+- [x] **Assignment System**: Create, submit, and grade assignments
+  - `/api/assignments` - CRUD for assignments
+  - `/api/assignments/{id}/submit` - Student submission with file upload
+  - `/api/submissions/{id}/grade` - Trainer/admin grading
+- [x] **Auto Certificate Generation**: Issued when course completed
+  - All modules marked complete
+  - Quiz passed (80%+)
+  - Certificate number format: PS-YYYY-XXXXXXXX
+  - `/api/certificates/verify/{number}` - Public verification
+
+### Course Learning Page (`/learn/:slug`)
+- [x] Module list with completion status (checkmarks)
+- [x] Video player for course content
+- [x] Quiz tab with questions and attempt tracking
+- [x] Assignment tab with submission status
+- [x] Certificate display on completion
+
+### My Learning Page (`/my-courses`)
+- [x] Stats: Enrolled, Completed, Certificates, Avg Progress
+- [x] Tabs: In Progress, Completed, Certificates
+- [x] Progress bars on course cards
+- [x] "Continue Learning" buttons
+
+### RBAC System (Jan 29, 2026)
 - [x] Three-tier role system: Admin, Trainer, Learner
 - [x] Backend RBAC: `require_admin` and `require_trainer_or_admin` decorators
 - [x] Frontend AuthContext: `isAdmin`, `isTrainer`, `isTrainerOrAdmin` flags
