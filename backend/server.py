@@ -1603,6 +1603,152 @@ async def complete_lab(lab_id: str, user: dict = Depends(get_current_user)):
     await log_access(user["id"], "lab", lab_id, "complete")
     return {"message": "Lab marked as completed", "lab_id": lab_id}
 
+# Interactive Lab Simulation (LLM-powered)
+class LabExecuteRequest(BaseModel):
+    lab_id: str
+    step_id: str
+    code: str
+    execution_type: str = "terminal"  # terminal, python, sql, upload
+
+@api_router.post("/labs/execute")
+async def execute_lab_code(request: LabExecuteRequest, user: dict = Depends(get_current_user)):
+    """Execute code in the interactive lab environment (LLM-simulated)"""
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=500, detail="LLM key not configured")
+    
+    lab = await db.labs.find_one({"id": request.lab_id}, {"_id": 0})
+    if not lab:
+        raise HTTPException(status_code=404, detail="Lab not found")
+    
+    # Find the current step
+    current_step = None
+    for step in lab.get("steps", []):
+        if step["id"] == request.step_id:
+            current_step = step
+            break
+    
+    if not current_step:
+        raise HTTPException(status_code=404, detail="Step not found")
+    
+    # Build context for LLM
+    system_prompt = f"""You are a coding environment simulator for an educational platform. You simulate the execution of code and commands.
+
+Lab: {lab['title']}
+Technology: {lab['technology']}
+Current Step: {current_step['title']}
+Step Instructions: {current_step['instructions']}
+Expected Output: {current_step.get('expected_output', 'Success')}
+
+Your role:
+1. Simulate realistic output for the given code/command
+2. If the code has errors, show realistic error messages
+3. If the code is correct, show the expected successful output
+4. For data operations, generate realistic sample data
+5. Be encouraging and educational
+
+Execution type: {request.execution_type}
+
+Respond with a JSON object:
+{{
+    "success": true/false,
+    "output": "the simulated console/terminal output",
+    "error": null or "error message if failed",
+    "hints": ["helpful hint if needed"],
+    "step_complete": true/false (whether this step's objective is achieved)
+}}"""
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"lab-exec-{user['id']}-{request.lab_id}",
+        system_message=system_prompt
+    ).with_model("openai", "gpt-5.2")
+    
+    try:
+        user_message = UserMessage(text=f"Execute this {request.execution_type} code:\n```\n{request.code}\n```")
+        response = await chat.send_message(user_message)
+        
+        # Parse the JSON response
+        try:
+            clean_response = response.strip()
+            if clean_response.startswith("```json"):
+                clean_response = clean_response[7:]
+            if clean_response.startswith("```"):
+                clean_response = clean_response[3:]
+            if clean_response.endswith("```"):
+                clean_response = clean_response[:-3]
+            
+            result = json.loads(clean_response.strip())
+        except json.JSONDecodeError:
+            # Fallback if JSON parsing fails
+            result = {
+                "success": True,
+                "output": response,
+                "error": None,
+                "hints": [],
+                "step_complete": False
+            }
+        
+        # Log the lab activity
+        await log_access(user["id"], "lab", request.lab_id, f"execute_{request.step_id}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Lab execution error: {str(e)}")
+        return {
+            "success": False,
+            "output": "",
+            "error": f"Simulation error: {str(e)}",
+            "hints": ["Try checking your syntax", "Review the step instructions"],
+            "step_complete": False
+        }
+
+@api_router.post("/labs/{lab_id}/save-progress")
+async def save_lab_progress(lab_id: str, step_id: str = "", user: dict = Depends(get_current_user)):
+    """Save user's progress in a lab"""
+    lab = await db.labs.find_one({"id": lab_id})
+    if not lab:
+        raise HTTPException(status_code=404, detail="Lab not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Update or create lab progress
+    progress = await db.lab_progress.find_one({"user_id": user["id"], "lab_id": lab_id})
+    
+    if progress:
+        completed_steps = progress.get("completed_steps", [])
+        if step_id and step_id not in completed_steps:
+            completed_steps.append(step_id)
+        
+        await db.lab_progress.update_one(
+            {"user_id": user["id"], "lab_id": lab_id},
+            {"$set": {"completed_steps": completed_steps, "last_step": step_id, "updated_at": now}}
+        )
+    else:
+        progress_doc = {
+            "id": str(uuid.uuid4()),
+            "user_id": user["id"],
+            "lab_id": lab_id,
+            "completed_steps": [step_id] if step_id else [],
+            "last_step": step_id,
+            "started_at": now,
+            "updated_at": now
+        }
+        await db.lab_progress.insert_one(progress_doc)
+    
+    return {"message": "Progress saved", "step_id": step_id}
+
+@api_router.get("/labs/{lab_id}/progress")
+async def get_lab_progress(lab_id: str, user: dict = Depends(get_current_user)):
+    """Get user's progress in a lab"""
+    progress = await db.lab_progress.find_one(
+        {"user_id": user["id"], "lab_id": lab_id},
+        {"_id": 0}
+    )
+    return progress or {"completed_steps": [], "last_step": None}
+
 # Trainer Lab Management
 @api_router.get("/trainer/labs")
 async def get_trainer_labs(user: dict = Depends(require_trainer_or_admin)):
