@@ -2114,7 +2114,7 @@ async def seed_data():
                 "tags": ["Finance", "AI", "Machine Learning"],
                 "max_participants": 500,
                 "registered_count": 0,
-                "is_published": True,
+                "is_active": True,
                 "created_by": admin_id,
                 "created_at": now
             },
