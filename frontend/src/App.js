@@ -11,6 +11,7 @@ import CourseDetailPage from '@/pages/CourseDetailPage';
 import MyCoursesPage from '@/pages/MyCoursesPage';
 import ProfilePage from '@/pages/ProfilePage';
 import AdminDashboard from '@/pages/AdminDashboard';
+import TrainerDashboard from '@/pages/TrainerDashboard';
 import LabsPage from '@/pages/LabsPage';
 import LabDetailPage from '@/pages/LabDetailPage';
 import OpenSourcePage from '@/pages/OpenSourcePage';
