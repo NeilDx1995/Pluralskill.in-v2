@@ -95,6 +95,13 @@ export const generateLearningPath = async (skillName, industry, currentLevel = '
   return response.data;
 };
 
+export const deleteLearningPath = async (pathId) => {
+  const response = await axios.delete(`${API_URL}/open-source/paths/${pathId}`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
 // Labs
 export const getLabs = async (publishedOnly = true) => {
   const response = await axios.get(`${API_URL}/labs`, {
