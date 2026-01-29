@@ -13,7 +13,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { BookOpen, GraduationCap, User, Settings, LogOut, Menu, X, Beaker, Route, Presentation } from 'lucide-react';
 
 const Navbar = () => {
-  const { user, isAuthenticated, isAdmin, logout } = useAuth();
+  const { user, isAuthenticated, isAdmin, isTrainer, isTrainerOrAdmin, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
@@ -120,17 +120,39 @@ const Navbar = () => {
                     <GraduationCap className="mr-2 h-4 w-4" />
                     My Learning
                   </DropdownMenuItem>
-                  {isAdmin && (
+                  {isTrainerOrAdmin && (
                     <>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onClick={() => navigate('/admin')}
-                        data-testid="menu-admin"
-                        className="cursor-pointer"
-                      >
-                        <Settings className="mr-2 h-4 w-4" />
-                        Admin Dashboard
-                      </DropdownMenuItem>
+                      {isTrainer && !isAdmin && (
+                        <DropdownMenuItem
+                          onClick={() => navigate('/trainer-dashboard')}
+                          data-testid="menu-trainer"
+                          className="cursor-pointer"
+                        >
+                          <Presentation className="mr-2 h-4 w-4" />
+                          Trainer Dashboard
+                        </DropdownMenuItem>
+                      )}
+                      {isAdmin && (
+                        <>
+                          <DropdownMenuItem
+                            onClick={() => navigate('/trainer-dashboard')}
+                            data-testid="menu-trainer"
+                            className="cursor-pointer"
+                          >
+                            <Presentation className="mr-2 h-4 w-4" />
+                            Trainer Dashboard
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => navigate('/admin')}
+                            data-testid="menu-admin"
+                            className="cursor-pointer"
+                          >
+                            <Settings className="mr-2 h-4 w-4" />
+                            Admin Dashboard
+                          </DropdownMenuItem>
+                        </>
+                      )}
                     </>
                   )}
                   <DropdownMenuSeparator />
