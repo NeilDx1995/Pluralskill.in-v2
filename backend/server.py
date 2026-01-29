@@ -1149,7 +1149,8 @@ async def create_assignment(data: AssignmentCreate, user: dict = Depends(require
     }
     
     await db.assignments.insert_one(assignment_doc)
-    del assignment_doc["_id"] if "_id" in assignment_doc else None
+    if "_id" in assignment_doc:
+        del assignment_doc["_id"]
     
     return assignment_doc
 
