@@ -16,6 +16,7 @@ import AdminDashboard from '@/pages/AdminDashboard';
 import TrainerDashboard from '@/pages/TrainerDashboard';
 import LabsPage from '@/pages/LabsPage';
 import LabDetailPage from '@/pages/LabDetailPage';
+import LabPracticePage from '@/pages/LabPracticePage';
 import OpenSourcePage from '@/pages/OpenSourcePage';
 import CertificateVerifyPage from '@/pages/CertificateVerifyPage';
 import '@/App.css';
