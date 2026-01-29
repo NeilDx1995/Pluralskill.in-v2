@@ -1214,7 +1214,8 @@ async def submit_assignment(
     }
     
     await db.submissions.insert_one(submission_doc)
-    del submission_doc["_id"] if "_id" in submission_doc else None
+    if "_id" in submission_doc:
+        del submission_doc["_id"]
     
     return submission_doc
 
