@@ -127,6 +127,31 @@ export const startLab = async (labId) => {
   return response.data;
 };
 
+export const executeLabCode = async (labId, stepId, code, executionType = 'terminal') => {
+  const response = await axios.post(
+    `${API_URL}/labs/execute`,
+    { lab_id: labId, step_id: stepId, code, execution_type: executionType },
+    { headers: getAuthHeader() }
+  );
+  return response.data;
+};
+
+export const saveLabProgress = async (labId, stepId) => {
+  const response = await axios.post(
+    `${API_URL}/labs/${labId}/save-progress`,
+    null,
+    { params: { step_id: stepId }, headers: getAuthHeader() }
+  );
+  return response.data;
+};
+
+export const getLabProgress = async (labId) => {
+  const response = await axios.get(`${API_URL}/labs/${labId}/progress`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
 export const completeLab = async (labId) => {
   const response = await axios.post(
     `${API_URL}/labs/${labId}/complete`,
