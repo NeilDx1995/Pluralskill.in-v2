@@ -603,7 +603,8 @@ async def check_and_issue_certificate(user_id: str, course_id: str) -> Optional[
     }
     
     await db.certificates.insert_one(cert_doc)
-    del cert_doc["_id"] if "_id" in cert_doc else None
+    if "_id" in cert_doc:
+        del cert_doc["_id"]
     
     logger.info(f"Certificate issued: {cert_doc['certificate_number']} for user {user_id}")
     return cert_doc
