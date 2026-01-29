@@ -35,12 +35,34 @@ JWT_EXPIRATION_HOURS = 24
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 
 # Create the main app
-app = FastAPI(title="PluralSkill API", version="2.0.0")
+app = FastAPI(title="PluralSkill API", version="3.0.0")
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
+# Mount static files for uploads
+UPLOAD_DIR = ROOT_DIR / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+(UPLOAD_DIR / "videos").mkdir(exist_ok=True)
+(UPLOAD_DIR / "documents").mkdir(exist_ok=True)
+(UPLOAD_DIR / "assignments").mkdir(exist_ok=True)
+(UPLOAD_DIR / "certificates").mkdir(exist_ok=True)
+
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+
 security = HTTPBearer(auto_error=False)
+
+# File upload settings
+MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500MB
+MAX_DOC_SIZE = 50 * 1024 * 1024     # 50MB
+ALLOWED_VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"]
+ALLOWED_DOC_TYPES = ["application/pdf", "application/vnd.openxmlformats-officedocument.presentationml.presentation", 
+                     "application/vnd.ms-powerpoint", "application/msword",
+                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
+
+# Certificate settings
+PASS_SCORE = 80  # 80% required to pass
+MAX_QUIZ_ATTEMPTS = 2  # Initial + 1 retry
 
 # Configure logging
 logging.basicConfig(
