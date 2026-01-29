@@ -1,6 +1,5 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -14,7 +13,6 @@ from datetime import datetime, timezone, timedelta
 import jwt
 import bcrypt
 import json
-import asyncio
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -49,6 +47,9 @@ logger = logging.getLogger(__name__)
 
 # ============== MODELS ==============
 
+# Roles: admin, trainer, learner
+VALID_ROLES = ["admin", "trainer", "learner"]
+
 class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
@@ -67,7 +68,7 @@ class UserProfile(BaseModel):
     last_name: str
     bio: Optional[str] = ""
     skills: List[str] = []
-    role: str = "user"
+    role: str = "learner"
     enrolled_courses: List[str] = []
     created_at: str
 
@@ -76,6 +77,9 @@ class UserProfileUpdate(BaseModel):
     last_name: Optional[str] = None
     bio: Optional[str] = None
     skills: Optional[List[str]] = None
+
+class UserRoleUpdate(BaseModel):
+    role: str
 
 # Workshop Models
 class WorkshopSpeaker(BaseModel):
@@ -182,12 +186,13 @@ class Course(BaseModel):
     enrolled_count: int = 0
     created_at: str
     updated_at: str
+    created_by: Optional[str] = None
 
 # Open Source Learning Path Models
 class OpenSourceResource(BaseModel):
     title: str
     url: str
-    type: str  # video, article, documentation, github, tutorial
+    type: str
     duration: Optional[str] = ""
     description: str
 
@@ -258,6 +263,15 @@ class Lab(BaseModel):
     is_published: bool
     completions_count: int = 0
     created_at: str
+    created_by: Optional[str] = None
+
+# Access Tracking Model
+class AccessLog(BaseModel):
+    user_id: str
+    content_type: str  # course, lab, workshop, open_source
+    content_id: str
+    action: str  # view, enroll, complete, start
+    timestamp: str
 
 class EnrollRequest(BaseModel):
     course_id: str
@@ -315,6 +329,23 @@ async def require_admin(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
+async def require_trainer_or_admin(user: dict = Depends(get_current_user)):
+    if user.get("role") not in ["admin", "trainer"]:
+        raise HTTPException(status_code=403, detail="Trainer or Admin access required")
+    return user
+
+async def log_access(user_id: str, content_type: str, content_id: str, action: str):
+    """Log user access for analytics"""
+    log_doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "content_type": content_type,
+        "content_id": content_id,
+        "action": action,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    await db.access_logs.insert_one(log_doc)
+
 # ============== AUTH ROUTES ==============
 
 @api_router.post("/auth/signup")
@@ -334,7 +365,7 @@ async def signup(user_data: UserCreate):
         "last_name": user_data.last_name,
         "bio": "",
         "skills": [],
-        "role": "user",
+        "role": "learner",  # Default role
         "enrolled_courses": [],
         "completed_labs": [],
         "created_at": now,
@@ -342,7 +373,7 @@ async def signup(user_data: UserCreate):
     }
     
     await db.users.insert_one(user_doc)
-    token = create_token(user_id, "user")
+    token = create_token(user_id, "learner")
     
     return {
         "token": token,
@@ -351,7 +382,7 @@ async def signup(user_data: UserCreate):
             "email": user_data.email,
             "first_name": user_data.first_name,
             "last_name": user_data.last_name,
-            "role": "user"
+            "role": "learner"
         }
     }
 
@@ -441,20 +472,29 @@ async def update_profile(profile_data: UserProfileUpdate, user: dict = Depends(g
 # ============== WORKSHOP ROUTES ==============
 
 @api_router.get("/workshops")
-async def get_workshops(active_only: bool = True):
+async def get_workshops(active_only: bool = True, user: dict = Depends(get_optional_user)):
     query = {"is_active": True} if active_only else {}
     workshops = await db.workshops.find(query, {"_id": 0}).sort("date", 1).to_list(100)
+    
+    # Log access
+    if user:
+        await log_access(user["id"], "workshop", "list", "view")
+    
     return workshops
 
 @api_router.get("/workshops/{workshop_id}")
-async def get_workshop(workshop_id: str):
+async def get_workshop(workshop_id: str, user: dict = Depends(get_optional_user)):
     workshop = await db.workshops.find_one({"id": workshop_id}, {"_id": 0})
     if not workshop:
         raise HTTPException(status_code=404, detail="Workshop not found")
+    
+    if user:
+        await log_access(user["id"], "workshop", workshop_id, "view")
+    
     return workshop
 
-@api_router.post("/admin/workshops")
-async def create_workshop(workshop_data: WorkshopCreate, admin: dict = Depends(require_admin)):
+@api_router.post("/trainer/workshops")
+async def trainer_create_workshop(workshop_data: WorkshopCreate, user: dict = Depends(require_trainer_or_admin)):
     workshop_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
@@ -462,7 +502,8 @@ async def create_workshop(workshop_data: WorkshopCreate, admin: dict = Depends(r
         "id": workshop_id,
         **workshop_data.model_dump(),
         "registered_count": 0,
-        "created_at": now
+        "created_at": now,
+        "created_by": user["id"]
     }
     
     await db.workshops.insert_one(workshop_doc)
@@ -470,11 +511,15 @@ async def create_workshop(workshop_data: WorkshopCreate, admin: dict = Depends(r
         del workshop_doc["_id"]
     return workshop_doc
 
-@api_router.put("/admin/workshops/{workshop_id}")
-async def update_workshop(workshop_id: str, workshop_data: WorkshopCreate, admin: dict = Depends(require_admin)):
+@api_router.put("/trainer/workshops/{workshop_id}")
+async def trainer_update_workshop(workshop_id: str, workshop_data: WorkshopCreate, user: dict = Depends(require_trainer_or_admin)):
     existing = await db.workshops.find_one({"id": workshop_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Workshop not found")
+    
+    # Trainers can only edit their own workshops, admins can edit any
+    if user["role"] == "trainer" and existing.get("created_by") != user["id"]:
+        raise HTTPException(status_code=403, detail="You can only edit your own workshops")
     
     update_doc = workshop_data.model_dump()
     await db.workshops.update_one({"id": workshop_id}, {"$set": update_doc})
@@ -482,19 +527,28 @@ async def update_workshop(workshop_id: str, workshop_data: WorkshopCreate, admin
     updated = await db.workshops.find_one({"id": workshop_id}, {"_id": 0})
     return updated
 
-@api_router.delete("/admin/workshops/{workshop_id}")
-async def delete_workshop(workshop_id: str, admin: dict = Depends(require_admin)):
-    result = await db.workshops.delete_one({"id": workshop_id})
-    if result.deleted_count == 0:
+@api_router.delete("/trainer/workshops/{workshop_id}")
+async def trainer_delete_workshop(workshop_id: str, user: dict = Depends(require_trainer_or_admin)):
+    existing = await db.workshops.find_one({"id": workshop_id})
+    if not existing:
         raise HTTPException(status_code=404, detail="Workshop not found")
+    
+    if user["role"] == "trainer" and existing.get("created_by") != user["id"]:
+        raise HTTPException(status_code=403, detail="You can only delete your own workshops")
+    
+    await db.workshops.delete_one({"id": workshop_id})
     return {"message": "Workshop deleted successfully"}
 
 # ============== COURSE ROUTES ==============
 
 @api_router.get("/courses")
-async def get_courses(published_only: bool = True):
+async def get_courses(published_only: bool = True, user: dict = Depends(get_optional_user)):
     query = {"is_published": True} if published_only else {}
     courses = await db.courses.find(query, {"_id": 0}).to_list(100)
+    
+    if user:
+        await log_access(user["id"], "course", "list", "view")
+    
     return courses
 
 @api_router.get("/courses/{slug}")
@@ -504,8 +558,10 @@ async def get_course_by_slug(slug: str, user: dict = Depends(get_optional_user))
         raise HTTPException(status_code=404, detail="Course not found")
     
     is_enrolled = False
-    if user and course["id"] in user.get("enrolled_courses", []):
-        is_enrolled = True
+    if user:
+        if course["id"] in user.get("enrolled_courses", []):
+            is_enrolled = True
+        await log_access(user["id"], "course", course["id"], "view")
     
     return {**course, "is_enrolled": is_enrolled}
 
@@ -528,6 +584,8 @@ async def enroll_in_course(data: EnrollRequest, user: dict = Depends(get_current
         {"$inc": {"enrolled_count": 1}}
     )
     
+    await log_access(user["id"], "course", data.course_id, "enroll")
+    
     return {"message": "Successfully enrolled in course", "course_id": data.course_id}
 
 @api_router.get("/my-courses")
@@ -539,8 +597,18 @@ async def get_my_courses(user: dict = Depends(get_current_user)):
     courses = await db.courses.find({"id": {"$in": enrolled_ids}}, {"_id": 0}).to_list(100)
     return courses
 
-@api_router.post("/admin/courses")
-async def create_course(course_data: CourseCreate, admin: dict = Depends(require_admin)):
+# Trainer Course Management
+@api_router.get("/trainer/courses")
+async def get_trainer_courses(user: dict = Depends(require_trainer_or_admin)):
+    """Get courses - trainers see their own, admins see all"""
+    if user["role"] == "admin":
+        courses = await db.courses.find({}, {"_id": 0}).to_list(100)
+    else:
+        courses = await db.courses.find({"created_by": user["id"]}, {"_id": 0}).to_list(100)
+    return courses
+
+@api_router.post("/trainer/courses")
+async def trainer_create_course(course_data: CourseCreate, user: dict = Depends(require_trainer_or_admin)):
     existing = await db.courses.find_one({"slug": course_data.slug})
     if existing:
         raise HTTPException(status_code=400, detail="Course with this slug already exists")
@@ -553,7 +621,8 @@ async def create_course(course_data: CourseCreate, admin: dict = Depends(require
         **course_data.model_dump(),
         "enrolled_count": 0,
         "created_at": now,
-        "updated_at": now
+        "updated_at": now,
+        "created_by": user["id"]
     }
     
     await db.courses.insert_one(course_doc)
@@ -561,11 +630,14 @@ async def create_course(course_data: CourseCreate, admin: dict = Depends(require
         del course_doc["_id"]
     return course_doc
 
-@api_router.put("/admin/courses/{course_id}")
-async def update_course(course_id: str, course_data: CourseUpdate, admin: dict = Depends(require_admin)):
+@api_router.put("/trainer/courses/{course_id}")
+async def trainer_update_course(course_id: str, course_data: CourseUpdate, user: dict = Depends(require_trainer_or_admin)):
     existing = await db.courses.find_one({"id": course_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Course not found")
+    
+    if user["role"] == "trainer" and existing.get("created_by") != user["id"]:
+        raise HTTPException(status_code=403, detail="You can only edit your own courses")
     
     update_doc = {"updated_at": datetime.now(timezone.utc).isoformat()}
     
@@ -577,30 +649,38 @@ async def update_course(course_id: str, course_data: CourseUpdate, admin: dict =
     updated = await db.courses.find_one({"id": course_id}, {"_id": 0})
     return updated
 
-@api_router.delete("/admin/courses/{course_id}")
-async def delete_course(course_id: str, admin: dict = Depends(require_admin)):
-    result = await db.courses.delete_one({"id": course_id})
-    if result.deleted_count == 0:
+@api_router.delete("/trainer/courses/{course_id}")
+async def trainer_delete_course(course_id: str, user: dict = Depends(require_trainer_or_admin)):
+    existing = await db.courses.find_one({"id": course_id})
+    if not existing:
         raise HTTPException(status_code=404, detail="Course not found")
+    
+    if user["role"] == "trainer" and existing.get("created_by") != user["id"]:
+        raise HTTPException(status_code=403, detail="You can only delete your own courses")
+    
+    await db.courses.delete_one({"id": course_id})
     return {"message": "Course deleted successfully"}
-
-@api_router.get("/admin/courses")
-async def get_all_courses(admin: dict = Depends(require_admin)):
-    courses = await db.courses.find({}, {"_id": 0}).to_list(100)
-    return courses
 
 # ============== OPEN SOURCE LEARNING PATHS ==============
 
 @api_router.get("/open-source/paths")
-async def get_learning_paths():
+async def get_learning_paths(user: dict = Depends(get_optional_user)):
     paths = await db.learning_paths.find({}, {"_id": 0}).to_list(100)
+    
+    if user:
+        await log_access(user["id"], "open_source", "list", "view")
+    
     return paths
 
 @api_router.get("/open-source/paths/{path_id}")
-async def get_learning_path(path_id: str):
+async def get_learning_path(path_id: str, user: dict = Depends(get_optional_user)):
     path = await db.learning_paths.find_one({"id": path_id}, {"_id": 0})
     if not path:
         raise HTTPException(status_code=404, detail="Learning path not found")
+    
+    if user:
+        await log_access(user["id"], "open_source", path_id, "view")
+    
     return path
 
 @api_router.post("/open-source/generate")
@@ -639,29 +719,21 @@ Your response must be valid JSON with this exact structure:
     ]
 }
 
-Use REAL URLs from:
-- YouTube tutorials
-- freeCodeCamp
-- Official documentation
-- GitHub repositories
-- Medium/Dev.to articles
-- Coursera/edX free courses"""
+Use REAL URLs from YouTube, freeCodeCamp, Official docs, GitHub, Medium/Dev.to."""
     ).with_model("openai", "gpt-5.2")
     
     prompt = f"""Create a detailed learning path for: {request.skill_name}
 Industry context: {request.industry}
 Current level: {request.current_level}
 
-Generate a 4-8 week roadmap with specific, real open-source resources. Focus on practical, hands-on learning with real-world projects."""
+Generate a 4-8 week roadmap with specific, real open-source resources."""
     
     user_message = UserMessage(text=prompt)
     
     try:
         response = await chat.send_message(user_message)
         
-        # Parse the JSON response
         try:
-            # Clean the response if wrapped in markdown
             clean_response = response.strip()
             if clean_response.startswith("```json"):
                 clean_response = clean_response[7:]
@@ -672,14 +744,12 @@ Generate a 4-8 week roadmap with specific, real open-source resources. Focus on 
             
             path_data = json.loads(clean_response.strip())
         except json.JSONDecodeError:
-            # If parsing fails, create a basic structure
             path_data = {
                 "description": f"Learning path for {request.skill_name} in {request.industry}",
                 "estimated_weeks": 6,
                 "steps": []
             }
         
-        # Save to database
         path_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
         
@@ -700,25 +770,25 @@ Generate a 4-8 week roadmap with specific, real open-source resources. Focus on 
         if "_id" in path_doc:
             del path_doc["_id"]
         
+        if user:
+            await log_access(user["id"], "open_source", path_id, "generate")
+        
         return path_doc
         
     except Exception as e:
         logger.error(f"Failed to generate learning path: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate learning path: {str(e)}")
 
-@api_router.delete("/admin/open-source/paths/{path_id}")
-async def delete_learning_path(path_id: str, admin: dict = Depends(require_admin)):
-    result = await db.learning_paths.delete_one({"id": path_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Learning path not found")
-    return {"message": "Learning path deleted"}
-
 # ============== LABS ROUTES ==============
 
 @api_router.get("/labs")
-async def get_labs(published_only: bool = True):
+async def get_labs(published_only: bool = True, user: dict = Depends(get_optional_user)):
     query = {"is_published": True} if published_only else {}
     labs = await db.labs.find(query, {"_id": 0}).to_list(100)
+    
+    if user:
+        await log_access(user["id"], "lab", "list", "view")
+    
     return labs
 
 @api_router.get("/labs/{slug}")
@@ -728,10 +798,21 @@ async def get_lab_by_slug(slug: str, user: dict = Depends(get_optional_user)):
         raise HTTPException(status_code=404, detail="Lab not found")
     
     is_completed = False
-    if user and lab["id"] in user.get("completed_labs", []):
-        is_completed = True
+    if user:
+        if lab["id"] in user.get("completed_labs", []):
+            is_completed = True
+        await log_access(user["id"], "lab", lab["id"], "view")
     
     return {**lab, "is_completed": is_completed}
+
+@api_router.post("/labs/{lab_id}/start")
+async def start_lab(lab_id: str, user: dict = Depends(get_current_user)):
+    lab = await db.labs.find_one({"id": lab_id}, {"_id": 0})
+    if not lab:
+        raise HTTPException(status_code=404, detail="Lab not found")
+    
+    await log_access(user["id"], "lab", lab_id, "start")
+    return {"message": "Lab started", "lab_id": lab_id}
 
 @api_router.post("/labs/{lab_id}/complete")
 async def complete_lab(lab_id: str, user: dict = Depends(get_current_user)):
@@ -749,10 +830,20 @@ async def complete_lab(lab_id: str, user: dict = Depends(get_current_user)):
             {"$inc": {"completions_count": 1}}
         )
     
+    await log_access(user["id"], "lab", lab_id, "complete")
     return {"message": "Lab marked as completed", "lab_id": lab_id}
 
-@api_router.post("/admin/labs")
-async def create_lab(lab_data: LabCreate, admin: dict = Depends(require_admin)):
+# Trainer Lab Management
+@api_router.get("/trainer/labs")
+async def get_trainer_labs(user: dict = Depends(require_trainer_or_admin)):
+    if user["role"] == "admin":
+        labs = await db.labs.find({}, {"_id": 0}).to_list(100)
+    else:
+        labs = await db.labs.find({"created_by": user["id"]}, {"_id": 0}).to_list(100)
+    return labs
+
+@api_router.post("/trainer/labs")
+async def trainer_create_lab(lab_data: LabCreate, user: dict = Depends(require_trainer_or_admin)):
     existing = await db.labs.find_one({"slug": lab_data.slug})
     if existing:
         raise HTTPException(status_code=400, detail="Lab with this slug already exists")
@@ -764,7 +855,8 @@ async def create_lab(lab_data: LabCreate, admin: dict = Depends(require_admin)):
         "id": lab_id,
         **lab_data.model_dump(),
         "completions_count": 0,
-        "created_at": now
+        "created_at": now,
+        "created_by": user["id"]
     }
     
     await db.labs.insert_one(lab_doc)
@@ -772,11 +864,14 @@ async def create_lab(lab_data: LabCreate, admin: dict = Depends(require_admin)):
         del lab_doc["_id"]
     return lab_doc
 
-@api_router.put("/admin/labs/{lab_id}")
-async def update_lab(lab_id: str, lab_data: LabCreate, admin: dict = Depends(require_admin)):
+@api_router.put("/trainer/labs/{lab_id}")
+async def trainer_update_lab(lab_id: str, lab_data: LabCreate, user: dict = Depends(require_trainer_or_admin)):
     existing = await db.labs.find_one({"id": lab_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Lab not found")
+    
+    if user["role"] == "trainer" and existing.get("created_by") != user["id"]:
+        raise HTTPException(status_code=403, detail="You can only edit your own labs")
     
     update_doc = lab_data.model_dump()
     await db.labs.update_one({"id": lab_id}, {"$set": update_doc})
@@ -784,44 +879,260 @@ async def update_lab(lab_id: str, lab_data: LabCreate, admin: dict = Depends(req
     updated = await db.labs.find_one({"id": lab_id}, {"_id": 0})
     return updated
 
-@api_router.delete("/admin/labs/{lab_id}")
-async def delete_lab(lab_id: str, admin: dict = Depends(require_admin)):
-    result = await db.labs.delete_one({"id": lab_id})
-    if result.deleted_count == 0:
+@api_router.delete("/trainer/labs/{lab_id}")
+async def trainer_delete_lab(lab_id: str, user: dict = Depends(require_trainer_or_admin)):
+    existing = await db.labs.find_one({"id": lab_id})
+    if not existing:
         raise HTTPException(status_code=404, detail="Lab not found")
+    
+    if user["role"] == "trainer" and existing.get("created_by") != user["id"]:
+        raise HTTPException(status_code=403, detail="You can only delete your own labs")
+    
+    await db.labs.delete_one({"id": lab_id})
     return {"message": "Lab deleted successfully"}
 
-@api_router.get("/admin/labs")
-async def get_all_labs(admin: dict = Depends(require_admin)):
-    labs = await db.labs.find({}, {"_id": 0}).to_list(100)
-    return labs
-
-# ============== ADMIN STATS ==============
+# ============== ADMIN ROUTES ==============
 
 @api_router.get("/admin/stats")
 async def get_admin_stats(admin: dict = Depends(require_admin)):
     total_users = await db.users.count_documents({})
+    total_learners = await db.users.count_documents({"role": "learner"})
+    total_trainers = await db.users.count_documents({"role": "trainer"})
     total_courses = await db.courses.count_documents({})
     total_workshops = await db.workshops.count_documents({})
     total_labs = await db.labs.count_documents({})
     total_paths = await db.learning_paths.count_documents({})
     published_courses = await db.courses.count_documents({"is_published": True})
     published_labs = await db.labs.count_documents({"is_published": True})
+    active_workshops = await db.workshops.count_documents({"is_active": True})
+    
+    # Get total enrollments
+    pipeline = [
+        {"$group": {"_id": None, "total": {"$sum": "$enrolled_count"}}}
+    ]
+    enrollment_result = await db.courses.aggregate(pipeline).to_list(1)
+    total_enrollments = enrollment_result[0]["total"] if enrollment_result else 0
+    
+    # Get total lab completions
+    pipeline = [
+        {"$group": {"_id": None, "total": {"$sum": "$completions_count"}}}
+    ]
+    completion_result = await db.labs.aggregate(pipeline).to_list(1)
+    total_completions = completion_result[0]["total"] if completion_result else 0
     
     return {
         "total_users": total_users,
+        "total_learners": total_learners,
+        "total_trainers": total_trainers,
         "total_courses": total_courses,
         "published_courses": published_courses,
         "total_workshops": total_workshops,
+        "active_workshops": active_workshops,
         "total_labs": total_labs,
         "published_labs": published_labs,
-        "total_learning_paths": total_paths
+        "total_learning_paths": total_paths,
+        "total_enrollments": total_enrollments,
+        "total_lab_completions": total_completions
+    }
+
+@api_router.get("/admin/analytics")
+async def get_admin_analytics(admin: dict = Depends(require_admin)):
+    """Get detailed analytics data for admin dashboard"""
+    now = datetime.now(timezone.utc)
+    
+    # Access logs by content type (last 30 days)
+    thirty_days_ago = (now - timedelta(days=30)).isoformat()
+    
+    pipeline = [
+        {"$match": {"timestamp": {"$gte": thirty_days_ago}}},
+        {"$group": {
+            "_id": {"content_type": "$content_type", "action": "$action"},
+            "count": {"$sum": 1}
+        }}
+    ]
+    access_stats = await db.access_logs.aggregate(pipeline).to_list(100)
+    
+    # Users by role
+    role_pipeline = [
+        {"$group": {"_id": "$role", "count": {"$sum": 1}}}
+    ]
+    users_by_role = await db.users.aggregate(role_pipeline).to_list(10)
+    
+    # Top courses by enrollment
+    top_courses = await db.courses.find(
+        {"is_published": True}, 
+        {"_id": 0, "title": 1, "enrolled_count": 1, "category": 1}
+    ).sort("enrolled_count", -1).limit(5).to_list(5)
+    
+    # Top labs by completions
+    top_labs = await db.labs.find(
+        {"is_published": True},
+        {"_id": 0, "title": 1, "completions_count": 1, "technology": 1}
+    ).sort("completions_count", -1).limit(5).to_list(5)
+    
+    # Courses by category
+    category_pipeline = [
+        {"$group": {"_id": "$category", "count": {"$sum": 1}}}
+    ]
+    courses_by_category = await db.courses.aggregate(category_pipeline).to_list(20)
+    
+    # Recent signups (last 7 days)
+    seven_days_ago = (now - timedelta(days=7)).isoformat()
+    recent_signups = await db.users.count_documents({"created_at": {"$gte": seven_days_ago}})
+    
+    return {
+        "access_stats": access_stats,
+        "users_by_role": users_by_role,
+        "top_courses": top_courses,
+        "top_labs": top_labs,
+        "courses_by_category": courses_by_category,
+        "recent_signups": recent_signups
     }
 
 @api_router.get("/admin/users")
 async def get_all_users(admin: dict = Depends(require_admin)):
     users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(1000)
     return users
+
+@api_router.put("/admin/users/{user_id}/role")
+async def update_user_role(user_id: str, role_data: UserRoleUpdate, admin: dict = Depends(require_admin)):
+    """Update a user's role (admin only)"""
+    if role_data.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {VALID_ROLES}")
+    
+    existing = await db.users.find_one({"id": user_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"role": role_data.role, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    updated_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    return updated_user
+
+@api_router.get("/admin/courses")
+async def get_all_courses(admin: dict = Depends(require_admin)):
+    courses = await db.courses.find({}, {"_id": 0}).to_list(100)
+    return courses
+
+@api_router.post("/admin/courses")
+async def admin_create_course(course_data: CourseCreate, admin: dict = Depends(require_admin)):
+    existing = await db.courses.find_one({"slug": course_data.slug})
+    if existing:
+        raise HTTPException(status_code=400, detail="Course with this slug already exists")
+    
+    course_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    course_doc = {
+        "id": course_id,
+        **course_data.model_dump(),
+        "enrolled_count": 0,
+        "created_at": now,
+        "updated_at": now,
+        "created_by": admin["id"]
+    }
+    
+    await db.courses.insert_one(course_doc)
+    if "_id" in course_doc:
+        del course_doc["_id"]
+    return course_doc
+
+@api_router.put("/admin/courses/{course_id}")
+async def admin_update_course(course_id: str, course_data: CourseUpdate, admin: dict = Depends(require_admin)):
+    existing = await db.courses.find_one({"id": course_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    update_doc = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    
+    for field, value in course_data.model_dump(exclude_unset=True).items():
+        if value is not None:
+            update_doc[field] = value
+    
+    await db.courses.update_one({"id": course_id}, {"$set": update_doc})
+    updated = await db.courses.find_one({"id": course_id}, {"_id": 0})
+    return updated
+
+@api_router.delete("/admin/courses/{course_id}")
+async def admin_delete_course(course_id: str, admin: dict = Depends(require_admin)):
+    result = await db.courses.delete_one({"id": course_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Course not found")
+    return {"message": "Course deleted successfully"}
+
+@api_router.get("/admin/workshops")
+async def get_all_workshops(admin: dict = Depends(require_admin)):
+    workshops = await db.workshops.find({}, {"_id": 0}).to_list(100)
+    return workshops
+
+@api_router.post("/admin/workshops")
+async def admin_create_workshop(workshop_data: WorkshopCreate, admin: dict = Depends(require_admin)):
+    workshop_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    workshop_doc = {
+        "id": workshop_id,
+        **workshop_data.model_dump(),
+        "registered_count": 0,
+        "created_at": now,
+        "created_by": admin["id"]
+    }
+    
+    await db.workshops.insert_one(workshop_doc)
+    if "_id" in workshop_doc:
+        del workshop_doc["_id"]
+    return workshop_doc
+
+@api_router.delete("/admin/workshops/{workshop_id}")
+async def admin_delete_workshop(workshop_id: str, admin: dict = Depends(require_admin)):
+    result = await db.workshops.delete_one({"id": workshop_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Workshop not found")
+    return {"message": "Workshop deleted successfully"}
+
+@api_router.get("/admin/labs")
+async def get_all_labs(admin: dict = Depends(require_admin)):
+    labs = await db.labs.find({}, {"_id": 0}).to_list(100)
+    return labs
+
+@api_router.post("/admin/labs")
+async def admin_create_lab(lab_data: LabCreate, admin: dict = Depends(require_admin)):
+    existing = await db.labs.find_one({"slug": lab_data.slug})
+    if existing:
+        raise HTTPException(status_code=400, detail="Lab with this slug already exists")
+    
+    lab_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    lab_doc = {
+        "id": lab_id,
+        **lab_data.model_dump(),
+        "completions_count": 0,
+        "created_at": now,
+        "created_by": admin["id"]
+    }
+    
+    await db.labs.insert_one(lab_doc)
+    if "_id" in lab_doc:
+        del lab_doc["_id"]
+    return lab_doc
+
+@api_router.delete("/admin/labs/{lab_id}")
+async def admin_delete_lab(lab_id: str, admin: dict = Depends(require_admin)):
+    result = await db.labs.delete_one({"id": lab_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Lab not found")
+    return {"message": "Lab deleted successfully"}
+
+@api_router.delete("/admin/open-source/paths/{path_id}")
+async def admin_delete_learning_path(path_id: str, admin: dict = Depends(require_admin)):
+    result = await db.learning_paths.delete_one({"id": path_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Learning path not found")
+    return {"message": "Learning path deleted"}
 
 # ============== HEALTH CHECK ==============
 
@@ -863,22 +1174,8 @@ async def seed_data():
                 "title": "AI in Finance: Transforming FP&A with Machine Learning",
                 "description": "Learn how leading financial institutions are leveraging AI for forecasting, risk assessment, and automated reporting. Real case studies from top banks and fintech companies.",
                 "speakers": [
-                    {
-                        "name": "Sarah Chen",
-                        "title": "VP of Data Science",
-                        "company": "Goldman Sachs",
-                        "company_logo": "https://logo.clearbit.com/goldmansachs.com",
-                        "avatar_url": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200",
-                        "linkedin": "https://linkedin.com"
-                    },
-                    {
-                        "name": "Michael Torres",
-                        "title": "Head of AI Products",
-                        "company": "Stripe",
-                        "company_logo": "https://logo.clearbit.com/stripe.com",
-                        "avatar_url": "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200",
-                        "linkedin": "https://linkedin.com"
-                    }
+                    {"name": "Sarah Chen", "title": "VP of Data Science", "company": "Goldman Sachs", "company_logo": "https://logo.clearbit.com/goldmansachs.com", "avatar_url": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200", "linkedin": ""},
+                    {"name": "Michael Torres", "title": "Head of AI Products", "company": "Stripe", "company_logo": "https://logo.clearbit.com/stripe.com", "avatar_url": "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200", "linkedin": ""}
                 ],
                 "date": "2026-02-15T18:00:00Z",
                 "duration_minutes": 90,
@@ -894,16 +1191,7 @@ async def seed_data():
                 "id": str(uuid.uuid4()),
                 "title": "Building Data-Driven HR: From Analytics to Action",
                 "description": "Industry leaders from Microsoft and Workday share how they use people analytics to drive retention, engagement, and strategic workforce planning.",
-                "speakers": [
-                    {
-                        "name": "Jennifer Williams",
-                        "title": "Chief People Analytics Officer",
-                        "company": "Microsoft",
-                        "company_logo": "https://logo.clearbit.com/microsoft.com",
-                        "avatar_url": "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=200",
-                        "linkedin": "https://linkedin.com"
-                    }
-                ],
+                "speakers": [{"name": "Jennifer Williams", "title": "Chief People Analytics Officer", "company": "Microsoft", "company_logo": "https://logo.clearbit.com/microsoft.com", "avatar_url": "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=200", "linkedin": ""}],
                 "date": "2026-02-22T17:00:00Z",
                 "duration_minutes": 60,
                 "max_participants": 300,
@@ -919,22 +1207,8 @@ async def seed_data():
                 "title": "Supply Chain Resilience: Lessons from Industry Leaders",
                 "description": "Executives from Amazon and Toyota discuss how they built resilient supply chains using data analytics, AI, and real-time visibility tools.",
                 "speakers": [
-                    {
-                        "name": "David Kim",
-                        "title": "Director of Supply Chain Analytics",
-                        "company": "Amazon",
-                        "company_logo": "https://logo.clearbit.com/amazon.com",
-                        "avatar_url": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200",
-                        "linkedin": "https://linkedin.com"
-                    },
-                    {
-                        "name": "Yuki Tanaka",
-                        "title": "VP of Operations Excellence",
-                        "company": "Toyota",
-                        "company_logo": "https://logo.clearbit.com/toyota.com",
-                        "avatar_url": "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200",
-                        "linkedin": "https://linkedin.com"
-                    }
+                    {"name": "David Kim", "title": "Director of Supply Chain Analytics", "company": "Amazon", "company_logo": "https://logo.clearbit.com/amazon.com", "avatar_url": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200", "linkedin": ""},
+                    {"name": "Yuki Tanaka", "title": "VP of Operations Excellence", "company": "Toyota", "company_logo": "https://logo.clearbit.com/toyota.com", "avatar_url": "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200", "linkedin": ""}
                 ],
                 "date": "2026-03-01T16:00:00Z",
                 "duration_minutes": 75,
@@ -955,159 +1229,12 @@ async def seed_data():
     if course_count == 0:
         logger.info("Seeding courses...")
         courses = [
-            {
-                "id": str(uuid.uuid4()),
-                "title": "Finance & FP&A Essentials (Excel + Power BI)",
-                "slug": "finance-fpa-essentials",
-                "description": "Master financial planning and analysis with hands-on Excel modeling and Power BI dashboards. Learn to build P&L statements, forecast cash flow, analyze budget variance, and create executive-ready financial reports used by Fortune 500 companies.",
-                "short_description": "Model P&L statements, forecast cash flow, and analyze budget variance for financial planning.",
-                "thumbnail_url": "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=800",
-                "category": "Finance",
-                "industry": "Financial Services",
-                "level": "intermediate",
-                "duration_hours": 25,
-                "price": 0,
-                "modules": [
-                    {"id": str(uuid.uuid4()), "title": "Financial Modeling Fundamentals", "description": "Build your first P&L model from scratch", "duration_minutes": 90, "video_url": "", "order": 1},
-                    {"id": str(uuid.uuid4()), "title": "Cash Flow Forecasting", "description": "Create 12-month rolling forecasts", "duration_minutes": 120, "video_url": "", "order": 2},
-                    {"id": str(uuid.uuid4()), "title": "Budget Variance Analysis", "description": "Identify and explain variances", "duration_minutes": 90, "video_url": "", "order": 3},
-                    {"id": str(uuid.uuid4()), "title": "Power BI Financial Dashboards", "description": "Build interactive CFO dashboards", "duration_minutes": 150, "video_url": "", "order": 4}
-                ],
-                "tests": [
-                    {"id": str(uuid.uuid4()), "question": "What is the primary purpose of variance analysis?", "options": ["Track expenses", "Identify deviations from budget", "Calculate profit margins", "Forecast sales"], "correct_answer": 1, "explanation": "Variance analysis helps identify and explain differences between planned and actual performance."}
-                ],
-                "learning_outcomes": ["Build financial models in Excel", "Create cash flow forecasts", "Analyze budget variances", "Design Power BI dashboards"],
-                "is_published": True,
-                "enrolled_count": 1250,
-                "created_at": now,
-                "updated_at": now
-            },
-            {
-                "id": str(uuid.uuid4()),
-                "title": "HR Analytics Using Excel & Power BI",
-                "slug": "hr-analytics-excel-powerbi",
-                "description": "Transform HR data into actionable insights. Learn to analyze attrition patterns, build performance dashboards, track diversity metrics, and create workforce planning models used by top HR teams.",
-                "short_description": "Dive into attrition prediction, performance indicators, and diversity metrics with HR dashboards.",
-                "thumbnail_url": "https://images.unsplash.com/photo-1552664730-d307ca884978?w=800",
-                "category": "Human Resources",
-                "industry": "HR & People Operations",
-                "level": "beginner",
-                "duration_hours": 20,
-                "price": 0,
-                "modules": [
-                    {"id": str(uuid.uuid4()), "title": "HR Data Foundations", "description": "Clean and structure HR data for analysis", "duration_minutes": 60, "video_url": "", "order": 1},
-                    {"id": str(uuid.uuid4()), "title": "Attrition Analysis", "description": "Identify patterns and predict turnover", "duration_minutes": 90, "video_url": "", "order": 2},
-                    {"id": str(uuid.uuid4()), "title": "Performance Metrics", "description": "Build KPI dashboards for talent management", "duration_minutes": 90, "video_url": "", "order": 3},
-                    {"id": str(uuid.uuid4()), "title": "Diversity & Inclusion Analytics", "description": "Track and visualize D&I metrics", "duration_minutes": 75, "video_url": "", "order": 4}
-                ],
-                "tests": [],
-                "learning_outcomes": ["Analyze employee attrition", "Build HR dashboards", "Track diversity metrics", "Create workforce plans"],
-                "is_published": True,
-                "enrolled_count": 890,
-                "created_at": now,
-                "updated_at": now
-            },
-            {
-                "id": str(uuid.uuid4()),
-                "title": "Retail Analytics Using Excel & Power BI",
-                "slug": "retail-analytics",
-                "description": "Learn retail analytics from industry practitioners. Analyze sales trends, optimize inventory, measure store performance, and build customer segmentation models used by leading retailers.",
-                "short_description": "Analyze sales trends, store profitability, and inventory turnover with practical dashboards.",
-                "thumbnail_url": "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=800",
-                "category": "Retail",
-                "industry": "Retail & E-commerce",
-                "level": "intermediate",
-                "duration_hours": 22,
-                "price": 0,
-                "modules": [
-                    {"id": str(uuid.uuid4()), "title": "Sales Trend Analysis", "description": "Identify patterns in retail data", "duration_minutes": 90, "video_url": "", "order": 1},
-                    {"id": str(uuid.uuid4()), "title": "Inventory Optimization", "description": "Calculate turnover and reorder points", "duration_minutes": 120, "video_url": "", "order": 2},
-                    {"id": str(uuid.uuid4()), "title": "Store Performance", "description": "Compare and rank store metrics", "duration_minutes": 90, "video_url": "", "order": 3},
-                    {"id": str(uuid.uuid4()), "title": "Customer Segmentation", "description": "Build RFM models for targeting", "duration_minutes": 100, "video_url": "", "order": 4}
-                ],
-                "tests": [],
-                "learning_outcomes": ["Analyze retail sales data", "Optimize inventory levels", "Measure store performance", "Segment customers"],
-                "is_published": True,
-                "enrolled_count": 675,
-                "created_at": now,
-                "updated_at": now
-            },
-            {
-                "id": str(uuid.uuid4()),
-                "title": "Excel for Operations & Supply Chain",
-                "slug": "excel-operations-supply-chain",
-                "description": "Build practical Excel models for supply chain management. Learn demand forecasting, inventory analysis, supplier scorecards, and operations dashboards used in manufacturing and logistics.",
-                "short_description": "Build practical Excel models for demand planning, inventory analysis, and supplier performance.",
-                "thumbnail_url": "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800",
-                "category": "Operations",
-                "industry": "Supply Chain & Logistics",
-                "level": "intermediate",
-                "duration_hours": 28,
-                "price": 0,
-                "modules": [
-                    {"id": str(uuid.uuid4()), "title": "Demand Forecasting", "description": "Build time-series forecasting models", "duration_minutes": 120, "video_url": "", "order": 1},
-                    {"id": str(uuid.uuid4()), "title": "Inventory Models", "description": "EOQ, safety stock, and ABC analysis", "duration_minutes": 150, "video_url": "", "order": 2},
-                    {"id": str(uuid.uuid4()), "title": "Supplier Scorecards", "description": "Track and evaluate supplier performance", "duration_minutes": 90, "video_url": "", "order": 3},
-                    {"id": str(uuid.uuid4()), "title": "Operations Dashboards", "description": "Build KPI tracking systems", "duration_minutes": 120, "video_url": "", "order": 4}
-                ],
-                "tests": [],
-                "learning_outcomes": ["Forecast demand accurately", "Optimize inventory levels", "Evaluate suppliers", "Track operations KPIs"],
-                "is_published": True,
-                "enrolled_count": 520,
-                "created_at": now,
-                "updated_at": now
-            },
-            {
-                "id": str(uuid.uuid4()),
-                "title": "AI Tools for Daily Productivity",
-                "slug": "ai-productivity-tools",
-                "description": "Quick course on leveraging AI for everyday work tasks. Learn to use ChatGPT, Claude, and other AI tools for writing, analysis, presentations, and task automation.",
-                "short_description": "Leverage AI for writing, presentations, and automating daily tasks to boost productivity.",
-                "thumbnail_url": "https://images.unsplash.com/photo-1677442136019-21780ecad995?w=800",
-                "category": "Technology",
-                "industry": "Cross-Industry",
-                "level": "beginner",
-                "duration_hours": 8,
-                "price": 0,
-                "modules": [
-                    {"id": str(uuid.uuid4()), "title": "AI Writing Assistants", "description": "Master prompts for professional writing", "duration_minutes": 60, "video_url": "", "order": 1},
-                    {"id": str(uuid.uuid4()), "title": "AI for Data Analysis", "description": "Use AI to analyze and visualize data", "duration_minutes": 75, "video_url": "", "order": 2},
-                    {"id": str(uuid.uuid4()), "title": "AI Presentation Tools", "description": "Create compelling presentations faster", "duration_minutes": 45, "video_url": "", "order": 3},
-                    {"id": str(uuid.uuid4()), "title": "Workflow Automation", "description": "Automate repetitive tasks with AI", "duration_minutes": 60, "video_url": "", "order": 4}
-                ],
-                "tests": [],
-                "learning_outcomes": ["Write effectively with AI", "Analyze data using AI tools", "Create AI-powered presentations", "Automate daily tasks"],
-                "is_published": True,
-                "enrolled_count": 2100,
-                "created_at": now,
-                "updated_at": now
-            },
-            {
-                "id": str(uuid.uuid4()),
-                "title": "Power BI in Practice (Beginner → Intermediate)",
-                "slug": "power-bi-in-practice",
-                "description": "Comprehensive Power BI course from basics to advanced. Learn data modeling, DAX formulas, and interactive dashboard design with real-world business scenarios.",
-                "short_description": "Transform raw data into powerful business insights and interactive dashboards with Power BI.",
-                "thumbnail_url": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800",
-                "category": "Business Intelligence",
-                "industry": "Cross-Industry",
-                "level": "beginner",
-                "duration_hours": 35,
-                "price": 0,
-                "modules": [
-                    {"id": str(uuid.uuid4()), "title": "Power BI Fundamentals", "description": "Interface, data import, and basic visuals", "duration_minutes": 90, "video_url": "", "order": 1},
-                    {"id": str(uuid.uuid4()), "title": "Data Modeling", "description": "Relationships, hierarchies, and schemas", "duration_minutes": 120, "video_url": "", "order": 2},
-                    {"id": str(uuid.uuid4()), "title": "DAX Formulas", "description": "Calculated columns and measures", "duration_minutes": 150, "video_url": "", "order": 3},
-                    {"id": str(uuid.uuid4()), "title": "Advanced Visualizations", "description": "Custom visuals and storytelling", "duration_minutes": 120, "video_url": "", "order": 4},
-                    {"id": str(uuid.uuid4()), "title": "Publishing & Sharing", "description": "Workspaces, apps, and security", "duration_minutes": 75, "video_url": "", "order": 5}
-                ],
-                "tests": [],
-                "learning_outcomes": ["Import and transform data", "Build data models", "Write DAX formulas", "Design interactive dashboards"],
-                "is_published": True,
-                "enrolled_count": 1850,
-                "created_at": now,
-                "updated_at": now
-            }
+            {"id": str(uuid.uuid4()), "title": "Finance & FP&A Essentials (Excel + Power BI)", "slug": "finance-fpa-essentials", "description": "Master financial planning and analysis with hands-on Excel modeling and Power BI dashboards.", "short_description": "Model P&L statements, forecast cash flow, and analyze budget variance.", "thumbnail_url": "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=800", "category": "Finance", "industry": "Financial Services", "level": "intermediate", "duration_hours": 25, "price": 0, "modules": [{"id": str(uuid.uuid4()), "title": "Financial Modeling Fundamentals", "description": "Build your first P&L model", "duration_minutes": 90, "video_url": "", "order": 1}], "tests": [], "learning_outcomes": ["Build financial models", "Create dashboards"], "is_published": True, "enrolled_count": 1250, "created_at": now, "updated_at": now},
+            {"id": str(uuid.uuid4()), "title": "HR Analytics Using Excel & Power BI", "slug": "hr-analytics-excel-powerbi", "description": "Transform HR data into actionable insights.", "short_description": "Attrition prediction, performance indicators, diversity metrics.", "thumbnail_url": "https://images.unsplash.com/photo-1552664730-d307ca884978?w=800", "category": "Human Resources", "industry": "HR & People Operations", "level": "beginner", "duration_hours": 20, "price": 0, "modules": [], "tests": [], "learning_outcomes": ["Analyze attrition", "Build HR dashboards"], "is_published": True, "enrolled_count": 890, "created_at": now, "updated_at": now},
+            {"id": str(uuid.uuid4()), "title": "Retail Analytics Using Excel & Power BI", "slug": "retail-analytics", "description": "Learn retail analytics from industry practitioners.", "short_description": "Sales trends, store profitability, inventory turnover.", "thumbnail_url": "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=800", "category": "Retail", "industry": "Retail & E-commerce", "level": "intermediate", "duration_hours": 22, "price": 0, "modules": [], "tests": [], "learning_outcomes": ["Analyze retail data"], "is_published": True, "enrolled_count": 675, "created_at": now, "updated_at": now},
+            {"id": str(uuid.uuid4()), "title": "Excel for Operations & Supply Chain", "slug": "excel-operations-supply-chain", "description": "Build practical Excel models for supply chain management.", "short_description": "Demand planning, inventory analysis, supplier performance.", "thumbnail_url": "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800", "category": "Operations", "industry": "Supply Chain & Logistics", "level": "intermediate", "duration_hours": 28, "price": 0, "modules": [], "tests": [], "learning_outcomes": ["Forecast demand", "Optimize inventory"], "is_published": True, "enrolled_count": 520, "created_at": now, "updated_at": now},
+            {"id": str(uuid.uuid4()), "title": "AI Tools for Daily Productivity", "slug": "ai-productivity-tools", "description": "Leverage AI for everyday work tasks.", "short_description": "AI for writing, presentations, automating tasks.", "thumbnail_url": "https://images.unsplash.com/photo-1677442136019-21780ecad995?w=800", "category": "Technology", "industry": "Cross-Industry", "level": "beginner", "duration_hours": 8, "price": 0, "modules": [], "tests": [], "learning_outcomes": ["Use AI tools effectively"], "is_published": True, "enrolled_count": 2100, "created_at": now, "updated_at": now},
+            {"id": str(uuid.uuid4()), "title": "Power BI in Practice", "slug": "power-bi-in-practice", "description": "Comprehensive Power BI course from basics to advanced.", "short_description": "Data modeling, DAX formulas, interactive dashboards.", "thumbnail_url": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800", "category": "Business Intelligence", "industry": "Cross-Industry", "level": "beginner", "duration_hours": 35, "price": 0, "modules": [], "tests": [], "learning_outcomes": ["Master Power BI"], "is_published": True, "enrolled_count": 1850, "created_at": now, "updated_at": now}
         ]
         await db.courses.insert_many(courses)
         logger.info(f"Seeded {len(courses)} courses")
@@ -1117,103 +1244,10 @@ async def seed_data():
     if lab_count == 0:
         logger.info("Seeding labs...")
         labs = [
-            {
-                "id": str(uuid.uuid4()),
-                "title": "Python Data Pipeline: From CSV to Dashboard",
-                "slug": "python-data-pipeline",
-                "description": "Build a complete data pipeline in Python. Load CSV data, clean and transform it with Pandas, store in SQLite, and create visualizations. Experience the full data engineering lifecycle.",
-                "short_description": "Build an end-to-end data pipeline with Python, Pandas, and SQLite.",
-                "thumbnail_url": "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800",
-                "category": "Data Engineering",
-                "technology": "Python",
-                "difficulty": "intermediate",
-                "estimated_time_minutes": 120,
-                "steps": [
-                    {"id": str(uuid.uuid4()), "title": "Environment Setup", "description": "Set up your Python environment", "instructions": "Install Python, create virtual environment, install pandas and sqlite3", "expected_outcome": "Working Python environment with required packages", "hints": ["Use pip install pandas", "Check python --version"], "order": 1},
-                    {"id": str(uuid.uuid4()), "title": "Data Ingestion", "description": "Load and explore raw CSV data", "instructions": "Load the sales_data.csv file and perform initial exploration", "expected_outcome": "DataFrame loaded with shape and dtypes printed", "hints": ["Use pd.read_csv()", "Check df.info()"], "order": 2},
-                    {"id": str(uuid.uuid4()), "title": "Data Cleaning", "description": "Handle missing values and data types", "instructions": "Clean the data: handle nulls, fix dates, validate categories", "expected_outcome": "Clean DataFrame with no missing values", "hints": ["Use fillna() or dropna()", "pd.to_datetime()"], "order": 3},
-                    {"id": str(uuid.uuid4()), "title": "Transformation", "description": "Create derived columns and aggregations", "instructions": "Add calculated columns, create summary tables", "expected_outcome": "Transformed data with new metrics", "hints": ["Use groupby()", "Create new columns with assign()"], "order": 4},
-                    {"id": str(uuid.uuid4()), "title": "Database Storage", "description": "Store processed data in SQLite", "instructions": "Create SQLite database and load transformed data", "expected_outcome": "Data persisted in SQLite tables", "hints": ["Use to_sql()", "sqlite3.connect()"], "order": 5},
-                    {"id": str(uuid.uuid4()), "title": "Visualization", "description": "Create summary visualizations", "instructions": "Build charts showing key metrics and trends", "expected_outcome": "Dashboard-ready visualizations", "hints": ["Use matplotlib or plotly", "Save as PNG"], "order": 6}
-                ],
-                "prerequisites": ["Basic Python knowledge", "Understanding of data types"],
-                "skills_gained": ["Pandas data manipulation", "SQLite database operations", "Data visualization"],
-                "is_published": True,
-                "completions_count": 450,
-                "created_at": now
-            },
-            {
-                "id": str(uuid.uuid4()),
-                "title": "Machine Learning Model Deployment",
-                "slug": "ml-model-deployment",
-                "description": "Take a trained ML model from notebook to production. Learn to serialize models, build a Flask API, containerize with Docker, and deploy. Full MLOps lifecycle experience.",
-                "short_description": "Deploy a machine learning model with Flask, Docker, and cloud services.",
-                "thumbnail_url": "https://images.unsplash.com/photo-1555949963-aa79dcee981c?w=800",
-                "category": "Machine Learning",
-                "technology": "Python, Docker, Flask",
-                "difficulty": "advanced",
-                "estimated_time_minutes": 180,
-                "steps": [
-                    {"id": str(uuid.uuid4()), "title": "Model Serialization", "description": "Save your trained model", "instructions": "Use joblib or pickle to serialize the trained model", "expected_outcome": "Model file saved to disk", "hints": ["joblib.dump(model, 'model.pkl')"], "order": 1},
-                    {"id": str(uuid.uuid4()), "title": "Flask API", "description": "Build prediction endpoint", "instructions": "Create Flask app with /predict endpoint that loads model and returns predictions", "expected_outcome": "Working API that accepts JSON and returns predictions", "hints": ["Use @app.route('/predict', methods=['POST'])"], "order": 2},
-                    {"id": str(uuid.uuid4()), "title": "Dockerization", "description": "Containerize your application", "instructions": "Write Dockerfile and docker-compose.yml for your Flask app", "expected_outcome": "Docker image builds and runs successfully", "hints": ["FROM python:3.9-slim", "EXPOSE 5000"], "order": 3},
-                    {"id": str(uuid.uuid4()), "title": "Testing", "description": "Validate your deployment", "instructions": "Write tests and verify predictions match expected values", "expected_outcome": "All tests pass, predictions accurate", "hints": ["Use pytest", "Compare to training data predictions"], "order": 4},
-                    {"id": str(uuid.uuid4()), "title": "Cloud Deployment", "description": "Deploy to cloud platform", "instructions": "Deploy Docker container to cloud (AWS, GCP, or Heroku)", "expected_outcome": "Live API endpoint accessible via URL", "hints": ["Use docker push", "Set environment variables"], "order": 5}
-                ],
-                "prerequisites": ["Python intermediate", "Basic ML concepts", "Docker basics"],
-                "skills_gained": ["Model serialization", "API development", "Docker containerization", "Cloud deployment"],
-                "is_published": True,
-                "completions_count": 280,
-                "created_at": now
-            },
-            {
-                "id": str(uuid.uuid4()),
-                "title": "Financial Dashboard with Excel VBA",
-                "slug": "financial-dashboard-vba",
-                "description": "Build an automated financial reporting dashboard in Excel using VBA. Create dynamic charts, automate data refresh, and build user-friendly interfaces for non-technical stakeholders.",
-                "short_description": "Automate financial reporting with Excel VBA macros and dynamic dashboards.",
-                "thumbnail_url": "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=800",
-                "category": "Finance",
-                "technology": "Excel, VBA",
-                "difficulty": "intermediate",
-                "estimated_time_minutes": 150,
-                "steps": [
-                    {"id": str(uuid.uuid4()), "title": "Data Structure", "description": "Set up your Excel workbook", "instructions": "Create sheets for raw data, calculations, and dashboard", "expected_outcome": "Organized workbook with named ranges", "hints": ["Use named ranges for flexibility", "Separate data from presentation"], "order": 1},
-                    {"id": str(uuid.uuid4()), "title": "Formulas Layer", "description": "Build calculation engine", "instructions": "Create formulas for KPIs, ratios, and aggregations", "expected_outcome": "Dynamic calculations that update with data", "hints": ["Use SUMIFS, INDEX/MATCH", "Create helper columns"], "order": 2},
-                    {"id": str(uuid.uuid4()), "title": "Chart Design", "description": "Create dynamic visualizations", "instructions": "Build charts linked to calculation layer", "expected_outcome": "Professional charts that auto-update", "hints": ["Use dynamic ranges", "Format for readability"], "order": 3},
-                    {"id": str(uuid.uuid4()), "title": "VBA Automation", "description": "Write macros for automation", "instructions": "Create VBA macros for data refresh and report generation", "expected_outcome": "One-click report refresh", "hints": ["Use Sub RefreshData()", "Add error handling"], "order": 4},
-                    {"id": str(uuid.uuid4()), "title": "User Interface", "description": "Build friendly controls", "instructions": "Add buttons, dropdowns, and input forms", "expected_outcome": "Non-technical users can operate the dashboard", "hints": ["Use Form controls", "Add instruction text"], "order": 5}
-                ],
-                "prerequisites": ["Excel intermediate", "Basic VBA understanding"],
-                "skills_gained": ["Excel VBA programming", "Dynamic dashboards", "Automation", "Financial reporting"],
-                "is_published": True,
-                "completions_count": 620,
-                "created_at": now
-            },
-            {
-                "id": str(uuid.uuid4()),
-                "title": "Power BI Sales Analytics Solution",
-                "slug": "powerbi-sales-analytics",
-                "description": "Build a complete sales analytics solution in Power BI. From data modeling to DAX measures to interactive dashboards, create a solution ready for enterprise deployment.",
-                "short_description": "Create an enterprise-grade sales analytics dashboard in Power BI.",
-                "thumbnail_url": "https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800",
-                "category": "Business Intelligence",
-                "technology": "Power BI, DAX",
-                "difficulty": "intermediate",
-                "estimated_time_minutes": 180,
-                "steps": [
-                    {"id": str(uuid.uuid4()), "title": "Data Import", "description": "Connect to data sources", "instructions": "Import sales, products, and customer data into Power BI", "expected_outcome": "All data tables loaded in Power BI", "hints": ["Use Get Data", "Preview before loading"], "order": 1},
-                    {"id": str(uuid.uuid4()), "title": "Data Model", "description": "Build star schema", "instructions": "Create relationships between fact and dimension tables", "expected_outcome": "Clean star schema with proper cardinality", "hints": ["One-to-many relationships", "Hide foreign keys"], "order": 2},
-                    {"id": str(uuid.uuid4()), "title": "DAX Measures", "description": "Create key calculations", "instructions": "Write DAX measures for Total Sales, YoY Growth, etc.", "expected_outcome": "Reusable measures for all visuals", "hints": ["Use CALCULATE for context", "SUM vs SUMX"], "order": 3},
-                    {"id": str(uuid.uuid4()), "title": "Dashboard Design", "description": "Build interactive pages", "instructions": "Create overview, trends, and details pages", "expected_outcome": "Multi-page interactive report", "hints": ["Use consistent formatting", "Add slicers"], "order": 4},
-                    {"id": str(uuid.uuid4()), "title": "Advanced Features", "description": "Add drill-through and bookmarks", "instructions": "Enable drill-through and create bookmarks for navigation", "expected_outcome": "Enterprise-ready interactive features", "hints": ["Right-click drill through", "Bookmark navigator"], "order": 5}
-                ],
-                "prerequisites": ["Power BI basics", "Understanding of data modeling"],
-                "skills_gained": ["Power BI data modeling", "DAX formulas", "Dashboard design", "Enterprise BI"],
-                "is_published": True,
-                "completions_count": 780,
-                "created_at": now
-            }
+            {"id": str(uuid.uuid4()), "title": "Python Data Pipeline: From CSV to Dashboard", "slug": "python-data-pipeline", "description": "Build a complete data pipeline in Python.", "short_description": "End-to-end data pipeline with Python, Pandas, SQLite.", "thumbnail_url": "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800", "category": "Data Engineering", "technology": "Python", "difficulty": "intermediate", "estimated_time_minutes": 120, "steps": [{"id": str(uuid.uuid4()), "title": "Environment Setup", "description": "Set up Python environment", "instructions": "Install packages", "expected_outcome": "Working environment", "hints": ["pip install pandas"], "order": 1}], "prerequisites": ["Basic Python"], "skills_gained": ["Pandas", "SQLite"], "is_published": True, "completions_count": 450, "created_at": now},
+            {"id": str(uuid.uuid4()), "title": "Machine Learning Model Deployment", "slug": "ml-model-deployment", "description": "Deploy ML model to production.", "short_description": "Flask, Docker, cloud deployment.", "thumbnail_url": "https://images.unsplash.com/photo-1555949963-aa79dcee981c?w=800", "category": "Machine Learning", "technology": "Python, Docker, Flask", "difficulty": "advanced", "estimated_time_minutes": 180, "steps": [], "prerequisites": ["Python intermediate", "Docker basics"], "skills_gained": ["Model deployment", "Docker"], "is_published": True, "completions_count": 280, "created_at": now},
+            {"id": str(uuid.uuid4()), "title": "Financial Dashboard with Excel VBA", "slug": "financial-dashboard-vba", "description": "Automated financial reporting dashboard.", "short_description": "Excel VBA macros and dynamic dashboards.", "thumbnail_url": "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=800", "category": "Finance", "technology": "Excel, VBA", "difficulty": "intermediate", "estimated_time_minutes": 150, "steps": [], "prerequisites": ["Excel intermediate"], "skills_gained": ["VBA programming"], "is_published": True, "completions_count": 620, "created_at": now},
+            {"id": str(uuid.uuid4()), "title": "Power BI Sales Analytics Solution", "slug": "powerbi-sales-analytics", "description": "Enterprise-grade sales analytics.", "short_description": "Data modeling, DAX, interactive dashboards.", "thumbnail_url": "https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800", "category": "Business Intelligence", "technology": "Power BI, DAX", "difficulty": "intermediate", "estimated_time_minutes": 180, "steps": [], "prerequisites": ["Power BI basics"], "skills_gained": ["Power BI modeling", "DAX"], "is_published": True, "completions_count": 780, "created_at": now}
         ]
         await db.labs.insert_many(labs)
         logger.info(f"Seeded {len(labs)} labs")
@@ -1222,19 +1256,14 @@ async def seed_data():
     admin_exists = await db.users.find_one({"email": "admin@pluralskill.com"})
     if not admin_exists:
         logger.info("Creating admin user...")
-        admin_doc = {
-            "id": str(uuid.uuid4()),
-            "email": "admin@pluralskill.com",
-            "password_hash": hash_password("admin123"),
-            "first_name": "Admin",
-            "last_name": "User",
-            "bio": "Platform Administrator",
-            "skills": ["Administration", "Management"],
-            "role": "admin",
-            "enrolled_courses": [],
-            "completed_labs": [],
-            "created_at": now,
-            "updated_at": now
-        }
+        admin_doc = {"id": str(uuid.uuid4()), "email": "admin@pluralskill.com", "password_hash": hash_password("admin123"), "first_name": "Admin", "last_name": "User", "bio": "Platform Administrator", "skills": [], "role": "admin", "enrolled_courses": [], "completed_labs": [], "created_at": now, "updated_at": now}
         await db.users.insert_one(admin_doc)
-        logger.info("Admin user created: admin@pluralskill.com / admin123")
+        logger.info("Admin user created")
+    
+    # Create trainer user if not exists
+    trainer_exists = await db.users.find_one({"email": "trainer@pluralskill.com"})
+    if not trainer_exists:
+        logger.info("Creating trainer user...")
+        trainer_doc = {"id": str(uuid.uuid4()), "email": "trainer@pluralskill.com", "password_hash": hash_password("trainer123"), "first_name": "Sarah", "last_name": "Trainer", "bio": "Course Instructor", "skills": ["Excel", "Power BI", "Python"], "role": "trainer", "enrolled_courses": [], "completed_labs": [], "created_at": now, "updated_at": now}
+        await db.users.insert_one(trainer_doc)
+        logger.info("Trainer user created")
