@@ -41,7 +41,7 @@ import {
 } from '@/components/ui/table';
 import { 
   Users, BookOpen, Calendar, Download, Plus, 
-  Pencil, Trash2, Loader2, Beaker, Route
+  Pencil, Trash2, Loader2, Beaker, Route, GraduationCap
 } from 'lucide-react';
 import { toast } from 'sonner';
 
