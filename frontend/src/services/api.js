@@ -182,6 +182,25 @@ export const submitQuiz = async (courseId, answers) => {
 
 // ============== FILE UPLOAD APIs ==============
 
+export const uploadImage = async (file, onProgress) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const response = await axios.post(`${API_URL}/upload/image`, formData, {
+    headers: {
+      ...getAuthHeader(),
+      'Content-Type': 'multipart/form-data'
+    },
+    onUploadProgress: (progressEvent) => {
+      if (onProgress) {
+        const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        onProgress(percent);
+      }
+    }
+  });
+  return response.data;
+};
+
 export const uploadVideo = async (file, onProgress) => {
   const formData = new FormData();
   formData.append('file', file);
