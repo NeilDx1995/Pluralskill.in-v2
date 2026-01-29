@@ -60,13 +60,15 @@ const CourseLearningPage = () => {
 
   const fetchData = useCallback(async () => {
     try {
-      const [courseData, progressData, assignmentsData] = await Promise.all([
-        getCourseBySlug(slug),
-        getCourseProgress(slug).catch(() => null),
-        getCourseAssignments(slug).catch(() => [])
-      ]);
-      
+      // First get the course to get its ID
+      const courseData = await getCourseBySlug(slug);
       setCourse(courseData);
+      
+      // Then fetch progress and assignments using course ID
+      const [progressData, assignmentsData] = await Promise.all([
+        getCourseProgress(courseData.id).catch(() => null),
+        getCourseAssignments(courseData.id).catch(() => [])
+      ]);
       
       if (progressData) {
         setProgress(progressData);
