@@ -470,7 +470,8 @@ async def create_workshop(workshop_data: WorkshopCreate, admin: dict = Depends(r
     }
     
     await db.workshops.insert_one(workshop_doc)
-    del workshop_doc["_id"] if "_id" in workshop_doc else None
+    if "_id" in workshop_doc:
+        del workshop_doc["_id"]
     return workshop_doc
 
 @api_router.delete("/admin/workshops/{workshop_id}")
