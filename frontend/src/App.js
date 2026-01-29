@@ -81,6 +81,11 @@ function App() {
               <MainLayout><LabDetailPage /></MainLayout>
             </ProtectedRoute>
           } />
+          <Route path="/labs/:slug/practice" element={
+            <ProtectedRoute>
+              <LabPracticePage />
+            </ProtectedRoute>
+          } />
           <Route path="/open-source" element={
             <ProtectedRoute>
               <MainLayout><OpenSourcePage /></MainLayout>
