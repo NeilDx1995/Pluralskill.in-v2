@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { BookOpen, GraduationCap, User, Settings, LogOut, Menu, X, Beaker, Route } from 'lucide-react';
+import { BookOpen, GraduationCap, User, Settings, LogOut, Menu, X, Beaker, Route, Presentation } from 'lucide-react';
 
 const Navbar = () => {
   const { user, isAuthenticated, isAdmin, logout } = useAuth();

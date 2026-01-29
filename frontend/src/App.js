@@ -46,6 +46,7 @@ function App() {
           <Route path="/my-courses" element={<MainLayout><MyCoursesPage /></MainLayout>} />
           <Route path="/profile" element={<MainLayout><ProfilePage /></MainLayout>} />
           <Route path="/admin" element={<MainLayout><AdminDashboard /></MainLayout>} />
+          <Route path="/trainer-dashboard" element={<MainLayout><TrainerDashboard /></MainLayout>} />
           <Route path="/labs" element={<MainLayout><LabsPage /></MainLayout>} />
           <Route path="/labs/:slug" element={<MainLayout><LabDetailPage /></MainLayout>} />
           <Route path="/open-source" element={<MainLayout><OpenSourcePage /></MainLayout>} />
