@@ -7,6 +7,56 @@ const getAuthHeader = () => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
+// Auth
+export const login = async (email, password) => {
+  const response = await axios.post(`${API_URL}/auth/login`, { email, password });
+  return response.data;
+};
+
+export const signup = async (email, password, firstName, lastName) => {
+  const response = await axios.post(`${API_URL}/auth/signup`, {
+    email,
+    password,
+    first_name: firstName,
+    last_name: lastName
+  });
+  return response.data;
+};
+
+// Workshops
+export const getWorkshops = async (activeOnly = true) => {
+  const response = await axios.get(`${API_URL}/workshops`, {
+    params: { active_only: activeOnly }
+  });
+  return response.data;
+};
+
+export const getWorkshop = async (workshopId) => {
+  const response = await axios.get(`${API_URL}/workshops/${workshopId}`);
+  return response.data;
+};
+
+export const createWorkshop = async (workshopData) => {
+  const response = await axios.post(`${API_URL}/admin/workshops`, workshopData, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const updateWorkshop = async (workshopId, workshopData) => {
+  const response = await axios.put(`${API_URL}/admin/workshops/${workshopId}`, workshopData, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const deleteWorkshop = async (workshopId) => {
+  const response = await axios.delete(`${API_URL}/admin/workshops/${workshopId}`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
 // Courses
 export const getCourses = async (publishedOnly = true) => {
   const response = await axios.get(`${API_URL}/courses`, {
@@ -38,6 +88,113 @@ export const getMyCourses = async () => {
   return response.data;
 };
 
+export const createCourse = async (courseData) => {
+  const response = await axios.post(`${API_URL}/admin/courses`, courseData, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const updateCourse = async (courseId, courseData) => {
+  const response = await axios.put(`${API_URL}/admin/courses/${courseId}`, courseData, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const deleteCourse = async (courseId) => {
+  const response = await axios.delete(`${API_URL}/admin/courses/${courseId}`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const getAdminCourses = async () => {
+  const response = await axios.get(`${API_URL}/admin/courses`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+// Open Source Learning Paths
+export const getLearningPaths = async () => {
+  const response = await axios.get(`${API_URL}/open-source/paths`);
+  return response.data;
+};
+
+export const getLearningPath = async (pathId) => {
+  const response = await axios.get(`${API_URL}/open-source/paths/${pathId}`);
+  return response.data;
+};
+
+export const generateLearningPath = async (skillName, industry, currentLevel = 'beginner') => {
+  const response = await axios.post(
+    `${API_URL}/open-source/generate`,
+    { skill_name: skillName, industry, current_level: currentLevel },
+    { headers: getAuthHeader() }
+  );
+  return response.data;
+};
+
+export const deleteLearningPath = async (pathId) => {
+  const response = await axios.delete(`${API_URL}/admin/open-source/paths/${pathId}`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+// Labs
+export const getLabs = async (publishedOnly = true) => {
+  const response = await axios.get(`${API_URL}/labs`, {
+    params: { published_only: publishedOnly }
+  });
+  return response.data;
+};
+
+export const getLabBySlug = async (slug) => {
+  const response = await axios.get(`${API_URL}/labs/${slug}`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const completeLab = async (labId) => {
+  const response = await axios.post(
+    `${API_URL}/labs/${labId}/complete`,
+    {},
+    { headers: getAuthHeader() }
+  );
+  return response.data;
+};
+
+export const createLab = async (labData) => {
+  const response = await axios.post(`${API_URL}/admin/labs`, labData, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const updateLab = async (labId, labData) => {
+  const response = await axios.put(`${API_URL}/admin/labs/${labId}`, labData, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const deleteLab = async (labId) => {
+  const response = await axios.delete(`${API_URL}/admin/labs/${labId}`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
+export const getAdminLabs = async () => {
+  const response = await axios.get(`${API_URL}/admin/labs`, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
 // User Profile
 export const getProfile = async () => {
   const response = await axios.get(`${API_URL}/users/profile`, {
@@ -62,14 +219,6 @@ export const changePassword = async (currentPassword, newPassword) => {
   return response.data;
 };
 
-// Workshops
-export const getWorkshops = async (activeOnly = true) => {
-  const response = await axios.get(`${API_URL}/workshops`, {
-    params: { active_only: activeOnly }
-  });
-  return response.data;
-};
-
 // Admin APIs
 export const getAdminStats = async () => {
   const response = await axios.get(`${API_URL}/admin/stats`, {
@@ -80,48 +229,6 @@ export const getAdminStats = async () => {
 
 export const getAdminUsers = async () => {
   const response = await axios.get(`${API_URL}/admin/users`, {
-    headers: getAuthHeader()
-  });
-  return response.data;
-};
-
-export const getAdminCourses = async () => {
-  const response = await axios.get(`${API_URL}/admin/courses`, {
-    headers: getAuthHeader()
-  });
-  return response.data;
-};
-
-export const createCourse = async (courseData) => {
-  const response = await axios.post(`${API_URL}/admin/courses`, courseData, {
-    headers: getAuthHeader()
-  });
-  return response.data;
-};
-
-export const updateCourse = async (courseId, courseData) => {
-  const response = await axios.put(`${API_URL}/admin/courses/${courseId}`, courseData, {
-    headers: getAuthHeader()
-  });
-  return response.data;
-};
-
-export const deleteCourse = async (courseId) => {
-  const response = await axios.delete(`${API_URL}/admin/courses/${courseId}`, {
-    headers: getAuthHeader()
-  });
-  return response.data;
-};
-
-export const createWorkshop = async (workshopData) => {
-  const response = await axios.post(`${API_URL}/admin/workshops`, workshopData, {
-    headers: getAuthHeader()
-  });
-  return response.data;
-};
-
-export const deleteWorkshop = async (workshopId) => {
-  const response = await axios.delete(`${API_URL}/admin/workshops/${workshopId}`, {
     headers: getAuthHeader()
   });
   return response.data;
