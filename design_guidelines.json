@@ -1,0 +1,167 @@
+{
+  "brand_identity": {
+    "name": "PluralSkill",
+    "archetype": "The Intellectual Architect",
+    "core_values": ["Growth", "Precision", "Community", "Future-Ready"],
+    "emotional_tone": "Structured yet organic. Professional yet warm. Not a cold corporate tool, but a digital garden for skills.",
+    "design_principles": [
+      "Fusion over Imitation: Mix Swiss Grid precision with Organic warmth.",
+      "Content is King: Every screen tells a story of progress.",
+      "Zoom In: Focus on the details of the learning experience.",
+      "Negative Space: Let the content breathe. 2x spacing by default."
+    ]
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Outfit, sans-serif",
+      "body": "Manrope, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "google_fonts_url": "https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap",
+    "rules": [
+      "Headings (H1-H3) must use 'Outfit'. Use weights 600 or 800. Letter-spacing: -0.02em.",
+      "Body text must use 'Manrope'. Weight 400 or 500. Line-height: 1.6.",
+      "Overlines/Labels: Uppercase, tracking-widest, text-xs, font-bold.",
+      "NEVER use Inter for headings."
+    ]
+  },
+  "colors": {
+    "mode": "light",
+    "palette": {
+      "primary": {
+        "DEFAULT": "#4338ca",
+        "foreground": "#ffffff",
+        "description": "Deep Indigo - Represents deep knowledge and focus."
+      },
+      "secondary": {
+        "DEFAULT": "#bef264",
+        "foreground": "#1a2e05",
+        "description": "Acid Lime - Represents growth, energy, and new skills. Use for accents, badges, and highlights."
+      },
+      "background": "#F9FAFB",
+      "foreground": "#0f172a",
+      "card": "#ffffff",
+      "card_foreground": "#0f172a",
+      "muted": "#f1f5f9",
+      "muted_foreground": "#64748b",
+      "border": "#e2e8f0",
+      "input": "#e2e8f0",
+      "ring": "#4338ca"
+    },
+    "gradients": {
+      "hero_glow": "bg-gradient-to-br from-indigo-50 via-white to-lime-50",
+      "active_border": "bg-gradient-to-r from-indigo-500 to-lime-400"
+    },
+    "rules": [
+      "Do not use generic blue (#3b82f6).",
+      "Use the Acid Lime sparingly (badges, active states, tiny accents).",
+      "Backgrounds should be off-white (#F9FAFB), not pure white, to reduce eye strain."
+    ]
+  },
+  "layout_system": {
+    "spacing_scale": "Generous. Use p-6, p-8, p-12 where others use p-4.",
+    "container_width": "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8",
+    "grids": {
+      "marketing": "Bento Grid (Mode A). Asymmetric. Mix col-span-4, col-span-8. Use gap-8.",
+      "dashboard": "High Density (Mode B). Strict grid. gap-4. Cards fill height."
+    },
+    "border_radius": {
+      "default": "rounded-2xl",
+      "card": "rounded-xl",
+      "button": "rounded-full"
+    }
+  },
+  "components": {
+    "buttons": {
+      "style": "Pill-shaped (rounded-full).",
+      "primary": "bg-primary text-white hover:bg-primary/90 shadow-lg shadow-indigo-500/20 transition-all hover:scale-105 active:scale-95",
+      "secondary": "bg-white text-primary border border-input hover:bg-accent hover:text-accent-foreground"
+    },
+    "cards": {
+      "marketing": "Glassmorphism. bg-white/70 backdrop-blur-xl border border-white/20 shadow-xl shadow-indigo-500/5.",
+      "dashboard": "Flat. bg-white border border-slate-100 shadow-sm hover:shadow-md transition-shadow."
+    },
+    "inputs": {
+      "style": "bg-slate-50 border-transparent focus:border-primary focus:bg-white transition-colors rounded-lg h-12"
+    },
+    "navigation": {
+      "style": "Floating glass header. Sticky. backdrop-blur-md bg-white/80 border-b border-slate-200/50."
+    }
+  },
+  "visual_assets": {
+    "icons_library": "lucide-react",
+    "images": {
+      "hero_main": {
+        "url": "https://images.unsplash.com/photo-1653669487404-09c3617c2b6c?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "alt": "Diverse students collaborating at a table in a modern office",
+        "usage": "Landing page hero section, main visual."
+      },
+      "auth_background": {
+        "url": "https://images.unsplash.com/photo-1633504885008-f8fed592a06a?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "alt": "Woman focused on work at a desk",
+        "usage": "Split screen background for Login/Signup pages."
+      },
+      "course_thumbnails": [
+        {
+          "url": "https://images.unsplash.com/photo-1581090694255-723d2dee30bc?crop=entropy&cs=srgb&fm=jpg&q=85",
+          "category": "Engineering",
+          "alt": "Engineer writing notes"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1581090697136-6bb1384e9700?crop=entropy&cs=srgb&fm=jpg&q=85",
+          "category": "Design",
+          "alt": "Creative planning and sketching"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1581090690193-36146cb0d813?crop=entropy&cs=srgb&fm=jpg&q=85",
+          "category": "Technology",
+          "alt": "Macbook Pro workspace"
+        }
+      ],
+      "instructors": [
+        {
+          "url": "https://images.unsplash.com/photo-1758519291946-13cc7761b4e7?crop=entropy&cs=srgb&fm=jpg&q=85",
+          "name": "Instructor 1",
+          "alt": "Professional man in suit working at cafe"
+        },
+        {
+          "url": "https://images.pexels.com/photos/3727513/pexels-photo-3727513.jpeg",
+          "name": "Instructor 2",
+          "alt": "Professional woman smiling"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "library": "framer-motion",
+    "rules": [
+      "Use 'AnimatePresence' for page transitions.",
+      "Hover effects: Scale 1.02 or 1.05. Never just color change.",
+      "Lists: Stagger children animations (staggerChildren: 0.1).",
+      "Scroll: Use 'whileInView' for section reveals (fade up + blur removal)."
+    ]
+  },
+  "accessibility": {
+    "rules": [
+      "Ensure text contrast ratio > 4.5:1.",
+      "Interactive elements must have :focus-visible styles (ring-2 ring-primary ring-offset-2).",
+      "All images must have alt text.",
+      "Use semantic HTML (main, section, article, nav)."
+    ]
+  },
+  "instructions_to_main_agent": [
+    "1. INSTALL FONTS FIRST: Add the Google Fonts link to public/index.html immediately.",
+    "2. CONFIGURE TAILWIND: Update tailwind.config.js with the colors and fonts defined above.",
+    "3. BUILD LAYOUTS: Use the 'Bento Grid' logic for the landing page. Don't make it a boring stack of sections.",
+    "4. USE IMAGES: Use the provided Unsplash URLs. DO NOT use placeholders.",
+    "5. DASHBOARD: Make it dense but readable. Use the 'High Density' grid rules.",
+    "6. DATA-TESTID: Add data-testid to all interactive elements (buttons, inputs, links)."
+  ],
+  "universal_guidelines": [
+    "Avoid 'AI Slop' - generic, centered, blue/gray designs.",
+    "Use 2-3x more spacing than you think is necessary.",
+    "Micro-animations are mandatory for every interaction.",
+    "Never use transparent backgrounds without blur/scrim.",
+    "Use 'sonner' for toasts."
+  ]
+}
