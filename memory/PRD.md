@@ -1,23 +1,25 @@
-# PluralSkill LMS v2 - Product Requirements Document
+# PluralSkill LMS v3 - Product Requirements Document
 
 ## Original Problem Statement
-Build PluralSkill v2 - an enhanced online learning platform with:
+Build PluralSkill v3 - an enhanced online learning platform with:
 1. **Workshops** (first priority) - Led by industry leaders from top organizations
 2. **Open Source** - AI-powered learning roadmaps for industry-specific skills
 3. **Courses** - Curriculum-based with videos, tests, and industry focus
 4. **Labs** - Simulation-based learning with guided step-by-step practice
+5. **Role-Based Access Control** - Admin, Trainer, and Learner roles with distinct permissions
 
 ## Architecture
 - **Frontend**: React 18 with React Router, ShadCN/UI components, Tailwind CSS
-- **Backend**: FastAPI (Python) with JWT authentication
+- **Backend**: FastAPI (Python) with JWT authentication & RBAC
 - **Database**: MongoDB with Motor (async driver)
 - **AI Integration**: OpenAI GPT-5.2 via Emergent LLM key for learning path generation
 - **Styling**: Custom design system (Indigo + Acid Lime theme, Outfit + Manrope fonts)
+- **Authentication**: JWT tokens with role claims (admin, trainer, learner)
 
 ## User Personas
-1. **Learner**: Professionals seeking industry-specific skills (Finance, HR, Retail, Supply Chain)
-2. **Admin**: Platform administrators managing content and users
-3. **Workshop Attendee**: Users interested in live sessions with industry experts
+1. **Learner**: Professionals seeking industry-specific skills (Finance, HR, Retail, Supply Chain) - view-only access to content
+2. **Trainer**: Content creators who can create and manage their own courses, labs, and workshops
+3. **Admin**: Platform administrators with full analytics, user management, and content oversight
 
 ## Core Requirements (Static)
 - User authentication (signup/login with JWT)
@@ -27,7 +29,20 @@ Build PluralSkill v2 - an enhanced online learning platform with:
 - Labs with simulation-based step-by-step learning
 - Admin dashboard with full CRUD
 
-## What's Been Implemented (Jan 29, 2026)
+## What's Been Implemented
+
+### RBAC System (Jan 29, 2026 - Latest)
+- [x] Three-tier role system: Admin, Trainer, Learner
+- [x] Backend RBAC: `require_admin` and `require_trainer_or_admin` decorators
+- [x] Frontend AuthContext: `isAdmin`, `isTrainer`, `isTrainerOrAdmin` flags
+- [x] Conditional navigation based on user role
+- [x] Trainer Dashboard at `/trainer-dashboard` for content management
+- [x] Admin Dashboard with full analytics at `/admin`
+- [x] Role-protected API endpoints:
+  - `/api/admin/*` - Admin only (403 for others)
+  - `/api/trainer/*` - Admin and Trainer (403 for learners)
+  - Public endpoints accessible to all
+- [x] Default seeded users: admin@pluralskill.com / trainer@pluralskill.com
 
 ### Workshops Section
 - [x] 3 workshops with industry leaders (Goldman Sachs, Microsoft, Amazon, Toyota, Stripe)
@@ -57,45 +72,56 @@ Build PluralSkill v2 - an enhanced online learning platform with:
 - [x] Completion tracking
 
 ### Admin Dashboard
-- [x] Stats overview (users, courses, workshops, labs)
-- [x] Full CRUD for courses
-- [x] Workshop management with speakers
-- [x] User list with CSV export
+- [x] Stats overview (users by role, courses, workshops, labs)
+- [x] Full CRUD for courses, workshops, labs
+- [x] User management with role assignment
+- [x] Analytics with top courses/labs by engagement
+- [x] User list with role breakdown (Learners, Trainers)
+
+### Trainer Dashboard
+- [x] Personal content stats (My Courses, My Labs, My Workshops)
+- [x] Course CRUD (trainers see only their own content)
+- [x] Lab CRUD with step-by-step editing
+- [x] Workshop creation and management
 
 ## Prioritized Backlog
 
-### P0 (Critical) - Done
+### P0 (Critical) - Done ✅
 - ✅ Workshops with industry leaders
 - ✅ AI learning path generation
 - ✅ Industry-focused courses
 - ✅ Simulation labs
+- ✅ Role-Based Access Control (Admin/Trainer/Learner)
 
-### P1 (High Priority) - Future
-- Video upload for course modules
-- Lab environment simulation (code editor)
-- Workshop registration
-- Course progress tracking
+### P1 (High Priority) - Next
+- Video upload for course modules (Trainer content management)
+- Test/quiz creation for courses
+- Full admin analytics (live webinars, access data)
+- Course progress tracking per user
 
 ### P2 (Medium Priority) - Future
+- Interactive Labs with code editor simulation
 - Certificate generation
 - Payment integration (Stripe)
 - Email notifications for workshops
-- Discussion forums
+- Workshop registration with capacity limits
 
 ### P3 (Low Priority) - Future
 - Social login (Google OAuth)
 - Course ratings/reviews
-- Instructor dashboard
-- Analytics dashboard
+- Document management (resume uploads)
+- Discussion forums
 
 ## Next Tasks
-1. Implement video upload for course modules
-2. Add interactive code editor for labs
-3. Enable workshop registration
+1. Implement video upload for course modules (Trainer feature)
+2. Add test/quiz builder for courses
+3. Complete admin analytics dashboard data
 4. Track course progress per user
 
 ## Test Credentials
 - **Admin**: admin@pluralskill.com / admin123
+- **Trainer**: trainer@pluralskill.com / trainer123
+- **Learner**: Sign up a new user (default role is learner)
 
 ## AI Integration Details
 - Uses `emergentintegrations` library with EMERGENT_LLM_KEY
