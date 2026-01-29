@@ -320,20 +320,53 @@ class PluralSkillAPITester:
         self.log("=== Testing Workshop Endpoints ===")
         
         # Test get workshops
-        self.run_test(
+        success, response = self.run_test(
             "Get Active Workshops", "GET", "workshops", 200
         )
         
+        # Verify workshop structure includes speakers and company info
+        if success and response:
+            workshops = response
+            if workshops:
+                first_workshop = workshops[0]
+                required_fields = ['id', 'title', 'description', 'speakers', 'date', 'duration_minutes']
+                missing_fields = [field for field in required_fields if field not in first_workshop]
+                if missing_fields:
+                    self.log(f"⚠️ Workshop missing fields: {missing_fields}")
+                else:
+                    self.log("✅ Workshop structure validated")
+                    
+                # Check speaker structure
+                if 'speakers' in first_workshop and first_workshop['speakers']:
+                    speaker = first_workshop['speakers'][0]
+                    speaker_fields = ['name', 'title', 'company', 'company_logo', 'avatar_url']
+                    missing_speaker_fields = [field for field in speaker_fields if field not in speaker]
+                    if missing_speaker_fields:
+                        self.log(f"⚠️ Speaker missing fields: {missing_speaker_fields}")
+                    else:
+                        self.log("✅ Speaker structure validated")
+        
         if self.admin_token:
-            # Test create workshop
+            # Test create workshop with proper speaker structure
             timestamp = datetime.now().strftime("%H%M%S")
             test_workshop = {
                 "title": f"Test Workshop {timestamp}",
                 "description": "Automated test workshop",
-                "instructor": "Test Instructor",
+                "speakers": [
+                    {
+                        "name": "Test Speaker",
+                        "title": "Senior Engineer",
+                        "company": "Test Company",
+                        "company_logo": "https://logo.clearbit.com/google.com",
+                        "avatar_url": "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200",
+                        "linkedin": "https://linkedin.com"
+                    }
+                ],
                 "date": "2026-03-15T18:00:00Z",
                 "duration_minutes": 90,
                 "max_participants": 25,
+                "platform": "Instagram Live",
+                "tags": ["Testing", "API"],
                 "is_active": True
             }
             
