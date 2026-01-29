@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { BookOpen, GraduationCap, User, Settings, LogOut, LayoutDashboard, Menu, X } from 'lucide-react';
+import { BookOpen, GraduationCap, User, Settings, LogOut, Menu, X, Beaker, Route } from 'lucide-react';
 
 const Navbar = () => {
   const { user, isAuthenticated, isAdmin, logout } = useAuth();
@@ -32,6 +32,8 @@ const Navbar = () => {
 
   const navLinks = [
     { to: '/courses', label: 'Courses', icon: BookOpen },
+    { to: '/labs', label: 'Labs', icon: Beaker },
+    { to: '/open-source', label: 'Open Source', icon: Route },
     ...(isAuthenticated ? [{ to: '/my-courses', label: 'My Learning', icon: GraduationCap }] : []),
   ];
 
@@ -116,7 +118,7 @@ const Navbar = () => {
                     className="cursor-pointer"
                   >
                     <GraduationCap className="mr-2 h-4 w-4" />
-                    My Courses
+                    My Learning
                   </DropdownMenuItem>
                   {isAdmin && (
                     <>
@@ -216,7 +218,7 @@ const Navbar = () => {
                       onClick={() => setMobileMenuOpen(false)}
                       className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-muted"
                     >
-                      <LayoutDashboard className="w-5 h-5" />
+                      <Settings className="w-5 h-5" />
                       Admin Dashboard
                     </Link>
                   )}

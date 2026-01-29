@@ -11,6 +11,9 @@ import CourseDetailPage from '@/pages/CourseDetailPage';
 import MyCoursesPage from '@/pages/MyCoursesPage';
 import ProfilePage from '@/pages/ProfilePage';
 import AdminDashboard from '@/pages/AdminDashboard';
+import LabsPage from '@/pages/LabsPage';
+import LabDetailPage from '@/pages/LabDetailPage';
+import OpenSourcePage from '@/pages/OpenSourcePage';
 import '@/App.css';
 
 // Layout wrapper with Navbar
@@ -42,6 +45,9 @@ function App() {
           <Route path="/my-courses" element={<MainLayout><MyCoursesPage /></MainLayout>} />
           <Route path="/profile" element={<MainLayout><ProfilePage /></MainLayout>} />
           <Route path="/admin" element={<MainLayout><AdminDashboard /></MainLayout>} />
+          <Route path="/labs" element={<MainLayout><LabsPage /></MainLayout>} />
+          <Route path="/labs/:slug" element={<MainLayout><LabDetailPage /></MainLayout>} />
+          <Route path="/open-source" element={<MainLayout><OpenSourcePage /></MainLayout>} />
         </Routes>
         <Toaster position="top-right" richColors />
       </BrowserRouter>
