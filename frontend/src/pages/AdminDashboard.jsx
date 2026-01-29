@@ -4,7 +4,8 @@ import { useAuth } from '@/context/AuthContext';
 import { 
   getAdminStats, getAdminUsers, getAdminCourses, 
   createCourse, updateCourse, deleteCourse,
-  getWorkshops, createWorkshop, deleteWorkshop
+  getWorkshops, createWorkshop, deleteWorkshop, updateWorkshop,
+  getAdminLabs, createLab, deleteLab
 } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,7 +41,7 @@ import {
 } from '@/components/ui/table';
 import { 
   Users, BookOpen, Calendar, Download, Plus, 
-  Pencil, Trash2, Loader2, BarChart3, GraduationCap
+  Pencil, Trash2, Loader2, Beaker, Route
 } from 'lucide-react';
 import { toast } from 'sonner';
 
