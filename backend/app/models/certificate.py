@@ -1,5 +1,7 @@
-from pydantic import BaseModel, ConfigDict
 from typing import Optional
+
+from pydantic import BaseModel, ConfigDict
+
 
 class Certificate(BaseModel):
     model_config = ConfigDict(extra="ignore")

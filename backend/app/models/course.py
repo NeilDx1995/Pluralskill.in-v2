@@ -1,7 +1,9 @@
+from typing import Any, List, Optional
+
 from pydantic import BaseModel, ConfigDict
-from typing import List, Optional, Any
 
 # ─── Workshops ────────────────────────────────────────────────
+
 
 class Workshop(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -19,6 +21,7 @@ class Workshop(BaseModel):
     is_active: bool = True
     created_at: Optional[str] = None
 
+
 class WorkshopCreate(BaseModel):
     title: str
     slug: str
@@ -30,7 +33,9 @@ class WorkshopCreate(BaseModel):
     tags: List[str] = []
     max_participants: int = 100
 
+
 # ─── Courses ──────────────────────────────────────────────────
+
 
 class Course(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -49,6 +54,7 @@ class Course(BaseModel):
     created_at: str
     updated_at: str
 
+
 class CourseCreate(BaseModel):
     title: str
     slug: str
@@ -59,6 +65,7 @@ class CourseCreate(BaseModel):
     price: int = 0
     thumbnail_url: Optional[str] = None
     is_published: bool = False
+
 
 class CourseUpdate(BaseModel):
     title: Optional[str] = None
@@ -72,7 +79,9 @@ class CourseUpdate(BaseModel):
     modules: Optional[List[dict]] = None
     is_published: Optional[bool] = None
 
+
 # ─── Labs ─────────────────────────────────────────────────────
+
 
 class LabStep(BaseModel):
     title: str
@@ -81,6 +90,7 @@ class LabStep(BaseModel):
     hint: Optional[str] = None
     validation_type: str = "manual"
     validation_criteria: Optional[str] = None
+
 
 class Lab(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -94,6 +104,7 @@ class Lab(BaseModel):
     steps: List[Any] = []
     video_url: Optional[str] = None
     created_at: Optional[str] = None
+
 
 class LabCreate(BaseModel):
     title: str

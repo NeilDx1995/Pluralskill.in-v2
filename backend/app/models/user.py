@@ -1,5 +1,7 @@
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
 
 class User(BaseModel):
     email: EmailStr
@@ -8,17 +10,19 @@ class User(BaseModel):
     last_name: str
     bio: Optional[str] = None
     skills: List[str] = []
-    
+
     model_config = ConfigDict(from_attributes=True)
+
 
 class UserInDB(User):
     id: str
     password_hash: str
-    role: str = "learner" # learner, trainer, admin
-    enrolled_courses: List[str] = [] # List of course IDs
-    completed_labs: List[str] = [] # List of lab IDs
+    role: str = "learner"  # learner, trainer, admin
+    enrolled_courses: List[str] = []  # List of course IDs
+    completed_labs: List[str] = []  # List of lab IDs
     created_at: str
     updated_at: str
+
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -26,9 +30,11 @@ class UserCreate(BaseModel):
     first_name: str
     last_name: str
 
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = None
@@ -37,14 +43,17 @@ class UserUpdate(BaseModel):
     skills: Optional[List[str]] = None
     password: Optional[str] = None
 
+
 class Token(BaseModel):
     access_token: str
     token_type: str
     role: str
     user_id: str
 
+
 class TokenData(BaseModel):
     email: Optional[str] = None
+
 
 class UserProfile(BaseModel):
     id: str
@@ -55,6 +64,7 @@ class UserProfile(BaseModel):
     skills: List[str] = []
     role: str
     created_at: str
+
 
 class UserProfileUpdate(BaseModel):
     first_name: Optional[str] = None

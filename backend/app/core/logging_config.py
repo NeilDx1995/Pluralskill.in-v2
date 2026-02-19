@@ -1,12 +1,14 @@
 import logging
 import sys
+
 from pythonjsonlogger import jsonlogger
+
 from app.core.config import settings
 
 
 def setup_logging():
     """Configure structured JSON logging for production."""
-    
+
     # JSON formatter for structured logs
     json_formatter = jsonlogger.JsonFormatter(
         fmt="%(asctime)s %(name)s %(levelname)s %(message)s",

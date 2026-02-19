@@ -1,5 +1,7 @@
 from motor.motor_asyncio import AsyncIOMotorClient
+
 from app.core.config import settings
+
 
 class Database:
     client: AsyncIOMotorClient = None
@@ -23,7 +25,9 @@ class Database:
             return self.db[name]
         raise AttributeError(f"Database not connected. Call connect() first.")
 
+
 db = Database()
+
 
 # Dependency to get DB instance (if needed in routes, though direct access to db.db is common in simple apps)
 async def get_db():

@@ -1,5 +1,7 @@
-from pydantic import BaseModel, ConfigDict
 from typing import Optional
+
+from pydantic import BaseModel, ConfigDict
+
 
 class AssignmentCreate(BaseModel):
     course_id: str
@@ -10,6 +12,7 @@ class AssignmentCreate(BaseModel):
     due_date: Optional[str] = None
     max_score: int = 100
     is_required: bool = True
+
 
 class Assignment(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -25,6 +28,7 @@ class Assignment(BaseModel):
     created_at: str
     created_by: str
 
+
 class AssignmentSubmission(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
@@ -39,9 +43,11 @@ class AssignmentSubmission(BaseModel):
     graded_at: Optional[str] = None
     graded_by: Optional[str] = None
 
+
 class SubmissionCreate(BaseModel):
     assignment_id: str
     notes: str = ""
+
 
 class GradeSubmission(BaseModel):
     grade: float

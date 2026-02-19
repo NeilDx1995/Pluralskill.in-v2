@@ -1,18 +1,20 @@
 from typing import List, Union
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     # App
     PROJECT_NAME: str = "PluralSkill API"
     VERSION: str = "4.0.0"
     API_V1_STR: str = "/api"
-    
+
     # Security
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRATION_HOURS: int = 168  # 7 days
-    
+
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:3000"]
 
@@ -49,9 +51,8 @@ class Settings(BaseSettings):
     MAX_DOC_SIZE: int = 50 * 1024 * 1024
 
     model_config = SettingsConfigDict(
-        env_file=".env", 
-        case_sensitive=True,
-        extra="ignore"
+        env_file=".env", case_sensitive=True, extra="ignore"
     )
+
 
 settings = Settings()

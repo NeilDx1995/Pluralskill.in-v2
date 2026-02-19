@@ -1,11 +1,14 @@
+from typing import Dict, List, Optional
+
 from pydantic import BaseModel, ConfigDict
-from typing import List, Optional, Dict
+
 
 class ModuleProgress(BaseModel):
     module_id: str
     completed: bool = False
     completed_at: Optional[str] = None
     time_spent_minutes: int = 0
+
 
 class QuizAttempt(BaseModel):
     attempt_number: int
@@ -14,11 +17,13 @@ class QuizAttempt(BaseModel):
     submitted_at: str
     passed: bool
 
+
 class QuizProgress(BaseModel):
     quiz_id: str  # course_id for course quiz
     attempts: List[QuizAttempt] = []
     best_score: float = 0
     passed: bool = False
+
 
 class CourseProgress(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -33,9 +38,11 @@ class CourseProgress(BaseModel):
     completed: bool = False
     completed_at: Optional[str] = None
 
+
 class SubmitQuizRequest(BaseModel):
     course_id: str
     answers: Dict[str, int]  # question_id: selected_answer_index
+
 
 class MarkModuleCompleteRequest(BaseModel):
     course_id: str

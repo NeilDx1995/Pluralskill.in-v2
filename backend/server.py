@@ -1,53 +1,61 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-from openai import AsyncOpenAI
-import os
-import logging
-from pathlib import Path
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
-from typing import List, Optional, Dict
-import uuid
-from datetime import datetime, timezone, timedelta
-import jwt
-import bcrypt
-import json
-import shutil
 import io
+import json
+import logging
+import os
+import shutil
+import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import bcrypt
+import jwt
+from dotenv import load_dotenv
+from fastapi import (APIRouter, Depends, FastAPI, File, Form, HTTPException,
+                     Request, UploadFile, status)
+from fastapi.responses import FileResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
+from motor.motor_asyncio import AsyncIOMotorClient
+from openai import AsyncOpenAI
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.middleware.cors import CORSMiddleware
 
 ROOT_DIR = Path(__file__).parent
-SERVICE_DIR = ROOT_DIR / 'services'
+SERVICE_DIR = ROOT_DIR / "services"
 import sys
+
 sys.path.append(str(ROOT_DIR))
 from services.storage import StorageService
-load_dotenv(ROOT_DIR / '.env')
+
+load_dotenv(ROOT_DIR / ".env")
 
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
+mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db = client[os.environ["DB_NAME"]]
 
 # JWT Configuration
 # JWT Configuration
-JWT_SECRET = os.environ.get('JWT_SECRET', '')
+JWT_SECRET = os.environ.get("JWT_SECRET", "")
 if not JWT_SECRET:
-    raise RuntimeError("JWT_SECRET environment variable is not set. Cannot start server securely.")
+    raise RuntimeError(
+        "JWT_SECRET environment variable is not set. Cannot start server securely."
+    )
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRATION_HOURS = 168 # 7 days
+JWT_EXPIRATION_HOURS = 168  # 7 days
 
 # LLM Configuration
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
-OPENAI_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4o')
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
 # Initialize OpenAI client (lazy - only used when AI features are called)
 openai_client = None
+
+
 def get_openai_client():
     global openai_client
     if not OPENAI_API_KEY:
@@ -55,6 +63,7 @@ def get_openai_client():
     if openai_client is None:
         openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
     return openai_client
+
 
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)
@@ -84,11 +93,15 @@ security = HTTPBearer(auto_error=False)
 
 # File upload settings
 MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500MB
-MAX_DOC_SIZE = 50 * 1024 * 1024     # 50MB
+MAX_DOC_SIZE = 50 * 1024 * 1024  # 50MB
 ALLOWED_VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"]
-ALLOWED_DOC_TYPES = ["application/pdf", "application/vnd.openxmlformats-officedocument.presentationml.presentation", 
-                     "application/vnd.ms-powerpoint", "application/msword",
-                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
+ALLOWED_DOC_TYPES = [
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.ms-powerpoint",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]
 
 # Certificate settings
 PASS_SCORE = 80  # 80% required to pass
@@ -96,8 +109,7 @@ MAX_QUIZ_ATTEMPTS = 2  # Initial + 1 retry
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -106,15 +118,18 @@ logger = logging.getLogger(__name__)
 # Roles: admin, trainer, learner
 VALID_ROLES = ["admin", "trainer", "learner"]
 
+
 class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
     first_name: str
     last_name: str
 
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
 
 class UserProfile(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -128,14 +143,17 @@ class UserProfile(BaseModel):
     enrolled_courses: List[str] = []
     created_at: str
 
+
 class UserProfileUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     bio: Optional[str] = None
     skills: Optional[List[str]] = None
 
+
 class UserRoleUpdate(BaseModel):
     role: str
+
 
 # Workshop Models
 class WorkshopSpeaker(BaseModel):
@@ -145,6 +163,7 @@ class WorkshopSpeaker(BaseModel):
     company_logo: Optional[str] = ""
     avatar_url: Optional[str] = ""
     linkedin: Optional[str] = ""
+
 
 class WorkshopCreate(BaseModel):
     title: str
@@ -157,6 +176,7 @@ class WorkshopCreate(BaseModel):
     platform_link: Optional[str] = ""
     tags: List[str] = []
     is_active: bool = True
+
 
 class Workshop(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -174,15 +194,17 @@ class Workshop(BaseModel):
     is_active: bool
     created_at: str
 
+
 # Course Models with Videos and Tests
 class ModuleItem(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     title: str
-    type: str = "video" # video, article, quiz
+    type: str = "video"  # video, article, quiz
     url: Optional[str] = ""
-    content: Optional[str] = "" # For articles
+    content: Optional[str] = ""  # For articles
     duration_minutes: int = 10
     is_free: bool = False
+
 
 class CourseModule(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -192,12 +214,14 @@ class CourseModule(BaseModel):
     items: List[ModuleItem] = []
     order: int = 0
 
+
 class CourseTest(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     question: str
     options: List[str]
     correct_answer: int
     explanation: Optional[str] = ""
+
 
 class CourseCreate(BaseModel):
     title: str
@@ -215,6 +239,7 @@ class CourseCreate(BaseModel):
     learning_outcomes: List[str] = []
     is_published: bool = False
 
+
 class CourseUpdate(BaseModel):
     title: Optional[str] = None
     slug: Optional[str] = None
@@ -230,6 +255,7 @@ class CourseUpdate(BaseModel):
     tests: Optional[List[CourseTest]] = None
     learning_outcomes: Optional[List[str]] = None
     is_published: Optional[bool] = None
+
 
 class Course(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -253,6 +279,7 @@ class Course(BaseModel):
     updated_at: str
     created_by: Optional[str] = None
 
+
 # Open Source Learning Path Models
 class OpenSourceResource(BaseModel):
     title: str
@@ -261,12 +288,14 @@ class OpenSourceResource(BaseModel):
     duration: Optional[str] = ""
     description: str
 
+
 class LearningPathStep(BaseModel):
     week: int
     title: str
     description: str
     resources: List[OpenSourceResource]
     skills_covered: List[str]
+
 
 class OpenSourcePath(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -280,10 +309,12 @@ class OpenSourcePath(BaseModel):
     created_at: str
     generated_by: str = "ai"
 
+
 class GeneratePathRequest(BaseModel):
     skill_name: str
     industry: str
     current_level: str = "beginner"
+
 
 # Lab Models
 class LabStep(BaseModel):
@@ -295,6 +326,7 @@ class LabStep(BaseModel):
     expected_output: str = ""
     hints: List[str] = []
     order: int
+
 
 class LabCreate(BaseModel):
     title: str
@@ -309,7 +341,8 @@ class LabCreate(BaseModel):
     steps: List[LabStep] = []
     prerequisites: List[str] = []
     skills_gained: List[str] = []
-    validation_type: str = "manual" # manual, code_match, output_match
+    validation_type: str = "manual"  # manual, code_match, output_match
+
 
 class Lab(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -333,6 +366,7 @@ class Lab(BaseModel):
     created_at: str
     created_by: Optional[str] = None
 
+
 # Access Tracking Model
 class AccessLog(BaseModel):
     user_id: str
@@ -341,20 +375,25 @@ class AccessLog(BaseModel):
     action: str  # view, enroll, complete, start
     timestamp: str
 
+
 class EnrollRequest(BaseModel):
     course_id: str
+
 
 class PasswordChange(BaseModel):
     current_password: str
     new_password: str = Field(min_length=6)
 
+
 # ============== PROGRESS TRACKING MODELS ==============
+
 
 class ModuleProgress(BaseModel):
     module_id: str
     completed: bool = False
     completed_at: Optional[str] = None
     time_spent_minutes: int = 0
+
 
 class QuizAttempt(BaseModel):
     attempt_number: int
@@ -363,11 +402,13 @@ class QuizAttempt(BaseModel):
     submitted_at: str
     passed: bool
 
+
 class QuizProgress(BaseModel):
     quiz_id: str  # course_id for course quiz
     attempts: List[QuizAttempt] = []
     best_score: float = 0
     passed: bool = False
+
 
 class CourseProgress(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -382,16 +423,20 @@ class CourseProgress(BaseModel):
     completed: bool = False
     completed_at: Optional[str] = None
 
+
 class SubmitQuizRequest(BaseModel):
     course_id: str
     answers: Dict[str, int]  # question_id: selected_answer_index
+
 
 class MarkModuleCompleteRequest(BaseModel):
     course_id: str
     module_id: str
     time_spent_minutes: int = 0
 
+
 # ============== ASSIGNMENT MODELS ==============
+
 
 class AssignmentCreate(BaseModel):
     course_id: str
@@ -402,6 +447,7 @@ class AssignmentCreate(BaseModel):
     due_date: Optional[str] = None
     max_score: int = 100
     is_required: bool = True
+
 
 class Assignment(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -417,6 +463,7 @@ class Assignment(BaseModel):
     created_at: str
     created_by: str
 
+
 class AssignmentSubmission(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
@@ -431,15 +478,19 @@ class AssignmentSubmission(BaseModel):
     graded_at: Optional[str] = None
     graded_by: Optional[str] = None
 
+
 class SubmissionCreate(BaseModel):
     assignment_id: str
     notes: str = ""
+
 
 class GradeSubmission(BaseModel):
     grade: float
     feedback: str = ""
 
+
 # ============== CERTIFICATE MODELS ==============
+
 
 class Certificate(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -454,21 +505,26 @@ class Certificate(BaseModel):
     completion_date: str
     pdf_url: Optional[str] = None
 
+
 # ============== HELPER FUNCTIONS ==============
 
+
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
 
 def verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+
 
 def create_token(user_id: str, role: str) -> str:
     payload = {
         "user_id": user_id,
         "role": role,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
 
 def decode_token(token: str) -> dict:
     try:
@@ -478,17 +534,23 @@ def decode_token(token: str) -> dict:
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
     if not credentials:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    
+
     payload = decode_token(credentials.credentials)
     user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
 
-async def get_optional_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+
+async def get_optional_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
     if not credentials:
         return None
     try:
@@ -498,15 +560,18 @@ async def get_optional_user(credentials: HTTPAuthorizationCredentials = Depends(
     except:
         return None
 
+
 async def require_admin(user: dict = Depends(get_current_user)):
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
+
 async def require_trainer_or_admin(user: dict = Depends(get_current_user)):
     if user.get("role") not in ["admin", "trainer"]:
         raise HTTPException(status_code=403, detail="Trainer or Admin access required")
     return user
+
 
 async def log_access(user_id: str, content_type: str, content_id: str, action: str):
     """Log user access for analytics"""
@@ -516,9 +581,10 @@ async def log_access(user_id: str, content_type: str, content_id: str, action: s
         "content_type": content_type,
         "content_id": content_id,
         "action": action,
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     await db.access_logs.insert_one(log_doc)
+
 
 def generate_certificate_number():
     """Generate unique certificate number like PS-2026-XXXX"""
@@ -526,29 +592,36 @@ def generate_certificate_number():
     random_part = uuid.uuid4().hex[:8].upper()
     return f"PS-{year}-{random_part}"
 
+
 async def calculate_course_progress(user_id: str, course_id: str) -> dict:
     """Calculate overall course progress including modules, quiz, and assignments"""
     course = await db.courses.find_one({"id": course_id}, {"_id": 0})
     if not course:
         return {"progress": 0, "completed": False}
-    
+
     progress_doc = await db.course_progress.find_one(
         {"user_id": user_id, "course_id": course_id}, {"_id": 0}
     )
-    
+
     if not progress_doc:
         return {"progress": 0, "completed": False}
-    
+
     total_items = 0
     completed_items = 0
-    
+
     # Module completion (50% weight)
     modules = course.get("modules", [])
     if modules:
         total_items += len(modules)
-        modules_progress = {m["module_id"]: m for m in progress_doc.get("modules_progress", [])}
-        completed_items += sum(1 for m in modules if modules_progress.get(m["id"], {}).get("completed", False))
-    
+        modules_progress = {
+            m["module_id"]: m for m in progress_doc.get("modules_progress", [])
+        }
+        completed_items += sum(
+            1
+            for m in modules
+            if modules_progress.get(m["id"], {}).get("completed", False)
+        )
+
     # Quiz completion (30% weight) - only if course has tests
     tests = course.get("tests", [])
     if tests:
@@ -556,24 +629,29 @@ async def calculate_course_progress(user_id: str, course_id: str) -> dict:
         quiz_progress = progress_doc.get("quiz_progress")
         if quiz_progress and quiz_progress.get("passed"):
             completed_items += 1
-    
+
     # Assignment completion (20% weight)
-    assignments = await db.assignments.find({"course_id": course_id, "is_required": True}).to_list(100)
+    assignments = await db.assignments.find(
+        {"course_id": course_id, "is_required": True}
+    ).to_list(100)
     if assignments:
         total_items += len(assignments)
         for assignment in assignments:
-            submission = await db.submissions.find_one({
-                "assignment_id": assignment["id"],
-                "user_id": user_id,
-                "grade": {"$ne": None}
-            })
+            submission = await db.submissions.find_one(
+                {
+                    "assignment_id": assignment["id"],
+                    "user_id": user_id,
+                    "grade": {"$ne": None},
+                }
+            )
             if submission:
                 completed_items += 1
-    
+
     progress = (completed_items / total_items * 100) if total_items > 0 else 0
     completed = progress >= 100
-    
+
     return {"progress": round(progress, 1), "completed": completed}
+
 
 async def check_and_issue_certificate(user_id: str, course_id: str) -> Optional[dict]:
     """Check if user qualifies for certificate and issue if so"""
@@ -583,28 +661,30 @@ async def check_and_issue_certificate(user_id: str, course_id: str) -> Optional[
     )
     if existing_cert:
         return existing_cert
-    
+
     # Get course and progress
     course = await db.courses.find_one({"id": course_id}, {"_id": 0})
     if not course:
         return None
-    
+
     progress_doc = await db.course_progress.find_one(
         {"user_id": user_id, "course_id": course_id}, {"_id": 0}
     )
     if not progress_doc:
         return None
-    
+
     # Check all modules completed
     modules = course.get("modules", [])
     if modules:
-        modules_progress = {m["module_id"]: m for m in progress_doc.get("modules_progress", [])}
+        modules_progress = {
+            m["module_id"]: m for m in progress_doc.get("modules_progress", [])
+        }
         all_modules_complete = all(
             modules_progress.get(m["id"], {}).get("completed", False) for m in modules
         )
         if not all_modules_complete:
             return None
-    
+
     # Check quiz passed (if exists)
     quiz_score = 0
     tests = course.get("tests", [])
@@ -613,23 +693,27 @@ async def check_and_issue_certificate(user_id: str, course_id: str) -> Optional[
         if not quiz_progress or not quiz_progress.get("passed"):
             return None
         quiz_score = quiz_progress.get("best_score", 0)
-    
+
     # Check required assignments graded
-    assignments = await db.assignments.find({"course_id": course_id, "is_required": True}).to_list(100)
+    assignments = await db.assignments.find(
+        {"course_id": course_id, "is_required": True}
+    ).to_list(100)
     for assignment in assignments:
-        submission = await db.submissions.find_one({
-            "assignment_id": assignment["id"],
-            "user_id": user_id,
-            "grade": {"$ne": None}
-        })
+        submission = await db.submissions.find_one(
+            {
+                "assignment_id": assignment["id"],
+                "user_id": user_id,
+                "grade": {"$ne": None},
+            }
+        )
         if not submission:
             return None
-    
+
     # Issue certificate
     user = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not user:
         return None
-    
+
     now = datetime.now(timezone.utc).isoformat()
     cert_doc = {
         "id": str(uuid.uuid4()),
@@ -641,17 +725,21 @@ async def check_and_issue_certificate(user_id: str, course_id: str) -> Optional[
         "issued_at": now,
         "quiz_score": quiz_score,
         "completion_date": now,
-        "pdf_url": None
+        "pdf_url": None,
     }
-    
+
     await db.certificates.insert_one(cert_doc)
     if "_id" in cert_doc:
         del cert_doc["_id"]
-    
-    logger.info(f"Certificate issued: {cert_doc['certificate_number']} for user {user_id}")
+
+    logger.info(
+        f"Certificate issued: {cert_doc['certificate_number']} for user {user_id}"
+    )
     return cert_doc
 
+
 # ============== AUTH ROUTES ==============
+
 
 @api_router.post("/auth/signup")
 @limiter.limit("5/minute")
@@ -659,10 +747,10 @@ async def signup(request: Request, user_data: UserCreate):
     existing = await db.users.find_one({"email": user_data.email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
+
     user_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    
+
     user_doc = {
         "id": user_id,
         "email": user_data.email,
@@ -675,12 +763,12 @@ async def signup(request: Request, user_data: UserCreate):
         "enrolled_courses": [],
         "completed_labs": [],
         "created_at": now,
-        "updated_at": now
+        "updated_at": now,
     }
-    
+
     await db.users.insert_one(user_doc)
     token = create_token(user_id, "learner")
-    
+
     return {
         "token": token,
         "user": {
@@ -688,9 +776,10 @@ async def signup(request: Request, user_data: UserCreate):
             "email": user_data.email,
             "first_name": user_data.first_name,
             "last_name": user_data.last_name,
-            "role": "learner"
-        }
+            "role": "learner",
+        },
     }
+
 
 @api_router.post("/auth/login")
 @limiter.limit("10/minute")
@@ -698,12 +787,12 @@ async def login(request: Request, credentials: UserLogin):
     user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    
+
     if not verify_password(credentials.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    
+
     token = create_token(user["id"], user["role"])
-    
+
     return {
         "token": token,
         "token_type": "bearer",
@@ -712,19 +801,22 @@ async def login(request: Request, credentials: UserLogin):
             "email": user["email"],
             "first_name": user["first_name"],
             "last_name": user["last_name"],
-            "role": user["role"]
-        }
+            "role": user["role"],
+        },
     }
+
 
 @api_router.post("/auth/refresh")
 @limiter.limit("5/minute")
-async def refresh_token(request: Request, current_user: dict = Depends(get_current_user)):
+async def refresh_token(
+    request: Request, current_user: dict = Depends(get_current_user)
+):
     """
     Refresh authentication token for an active session.
     Requires a valid (non-expired) token to issue a new one.
     """
     new_token = create_token(current_user["id"], current_user.get("role", "learner"))
-    
+
     return {
         "token": new_token,
         "token_type": "bearer",
@@ -733,9 +825,10 @@ async def refresh_token(request: Request, current_user: dict = Depends(get_curre
             "email": current_user["email"],
             "first_name": current_user["first_name"],
             "last_name": current_user["last_name"],
-            "role": current_user["role"]
-        }
+            "role": current_user["role"],
+        },
     }
+
 
 @api_router.get("/auth/me")
 async def get_me(user: dict = Depends(get_current_user)):
@@ -748,24 +841,32 @@ async def get_me(user: dict = Depends(get_current_user)):
         "skills": user.get("skills", []),
         "role": user["role"],
         "enrolled_courses": user.get("enrolled_courses", []),
-        "completed_labs": user.get("completed_labs", [])
+        "completed_labs": user.get("completed_labs", []),
     }
+
 
 @api_router.put("/auth/password")
 async def change_password(data: PasswordChange, user: dict = Depends(get_current_user)):
     full_user = await db.users.find_one({"id": user["id"]}, {"_id": 0})
-    
+
     if not verify_password(data.current_password, full_user["password_hash"]):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
-    
+
     await db.users.update_one(
         {"id": user["id"]},
-        {"$set": {"password_hash": hash_password(data.new_password), "updated_at": datetime.now(timezone.utc).isoformat()}}
+        {
+            "$set": {
+                "password_hash": hash_password(data.new_password),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
     )
-    
+
     return {"message": "Password updated successfully"}
 
+
 # ============== USER PROFILE ROUTES ==============
+
 
 @api_router.get("/users/profile", response_model=UserProfile)
 async def get_profile(user: dict = Depends(get_current_user)):
@@ -778,13 +879,16 @@ async def get_profile(user: dict = Depends(get_current_user)):
         skills=user.get("skills", []),
         role=user["role"],
         enrolled_courses=user.get("enrolled_courses", []),
-        created_at=user["created_at"]
+        created_at=user["created_at"],
     )
 
+
 @api_router.put("/users/profile")
-async def update_profile(profile_data: UserProfileUpdate, user: dict = Depends(get_current_user)):
+async def update_profile(
+    profile_data: UserProfileUpdate, user: dict = Depends(get_current_user)
+):
     update_doc = {"updated_at": datetime.now(timezone.utc).isoformat()}
-    
+
     if profile_data.first_name is not None:
         update_doc["first_name"] = profile_data.first_name
     if profile_data.last_name is not None:
@@ -793,168 +897,198 @@ async def update_profile(profile_data: UserProfileUpdate, user: dict = Depends(g
         update_doc["bio"] = profile_data.bio
     if profile_data.skills is not None:
         update_doc["skills"] = profile_data.skills
-    
+
     await db.users.update_one({"id": user["id"]}, {"$set": update_doc})
-    updated_user = await db.users.find_one({"id": user["id"]}, {"_id": 0, "password_hash": 0})
+    updated_user = await db.users.find_one(
+        {"id": user["id"]}, {"_id": 0, "password_hash": 0}
+    )
     return updated_user
+
 
 # ============== WORKSHOP ROUTES ==============
 
+
 @api_router.get("/workshops")
-async def get_workshops(active_only: bool = True, user: dict = Depends(get_optional_user)):
+async def get_workshops(
+    active_only: bool = True, user: dict = Depends(get_optional_user)
+):
     query = {"is_active": True} if active_only else {}
     workshops = await db.workshops.find(query, {"_id": 0}).sort("date", 1).to_list(100)
-    
+
     # Log access
     if user:
         await log_access(user["id"], "workshop", "list", "view")
-    
+
     return workshops
+
 
 @api_router.get("/workshops/{workshop_id}")
 async def get_workshop(workshop_id: str, user: dict = Depends(get_optional_user)):
     workshop = await db.workshops.find_one({"id": workshop_id}, {"_id": 0})
     if not workshop:
         raise HTTPException(status_code=404, detail="Workshop not found")
-    
+
     if user:
         await log_access(user["id"], "workshop", workshop_id, "view")
-    
+
     return workshop
 
+
 @api_router.post("/workshops/{workshop_id}/register")
-async def register_for_workshop(workshop_id: str, user: dict = Depends(get_current_user)):
+async def register_for_workshop(
+    workshop_id: str, user: dict = Depends(get_current_user)
+):
     workshop = await db.workshops.find_one({"id": workshop_id})
     if not workshop:
         raise HTTPException(status_code=404, detail="Workshop not found")
-    
+
     if not workshop.get("is_active", False):
         raise HTTPException(status_code=400, detail="Workshop is not active")
-    
+
     # Check capacity
     max_participants = workshop.get("max_participants", 500)
     if workshop.get("registered_count", 0) >= max_participants:
         raise HTTPException(status_code=400, detail="Workshop is full")
-    
+
     # Check if already registered
-    existing = await db.workshop_registrations.find_one({
-        "workshop_id": workshop_id,
-        "user_id": user["id"]
-    })
+    existing = await db.workshop_registrations.find_one(
+        {"workshop_id": workshop_id, "user_id": user["id"]}
+    )
     if existing:
-        raise HTTPException(status_code=400, detail="Already registered for this workshop")
-    
+        raise HTTPException(
+            status_code=400, detail="Already registered for this workshop"
+        )
+
     # Register user
     now = datetime.now(timezone.utc).isoformat()
     registration = {
         "id": str(uuid.uuid4()),
         "workshop_id": workshop_id,
         "user_id": user["id"],
-        "registered_at": now
+        "registered_at": now,
     }
     await db.workshop_registrations.insert_one(registration)
-    
+
     # Increment registered count
     await db.workshops.update_one(
-        {"id": workshop_id},
-        {"$inc": {"registered_count": 1}}
+        {"id": workshop_id}, {"$inc": {"registered_count": 1}}
     )
-    
+
     await log_access(user["id"], "workshop", workshop_id, "register")
-    
-    return {"message": "Successfully registered for workshop", "registration_id": registration["id"]}
+
+    return {
+        "message": "Successfully registered for workshop",
+        "registration_id": registration["id"],
+    }
+
 
 @api_router.post("/trainer/workshops")
-async def trainer_create_workshop(workshop_data: WorkshopCreate, user: dict = Depends(require_trainer_or_admin)):
+async def trainer_create_workshop(
+    workshop_data: WorkshopCreate, user: dict = Depends(require_trainer_or_admin)
+):
     workshop_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    
+
     workshop_doc = {
         "id": workshop_id,
         **workshop_data.model_dump(),
         "registered_count": 0,
         "created_at": now,
-        "created_by": user["id"]
+        "created_by": user["id"],
     }
-    
+
     await db.workshops.insert_one(workshop_doc)
     if "_id" in workshop_doc:
         del workshop_doc["_id"]
     return workshop_doc
 
+
 @api_router.put("/trainer/workshops/{workshop_id}")
-async def trainer_update_workshop(workshop_id: str, workshop_data: WorkshopCreate, user: dict = Depends(require_trainer_or_admin)):
+async def trainer_update_workshop(
+    workshop_id: str,
+    workshop_data: WorkshopCreate,
+    user: dict = Depends(require_trainer_or_admin),
+):
     existing = await db.workshops.find_one({"id": workshop_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Workshop not found")
-    
+
     # Trainers can only edit their own workshops, admins can edit any
     if user["role"] == "trainer" and existing.get("created_by") != user["id"]:
-        raise HTTPException(status_code=403, detail="You can only edit your own workshops")
-    
+        raise HTTPException(
+            status_code=403, detail="You can only edit your own workshops"
+        )
+
     update_doc = workshop_data.model_dump()
     await db.workshops.update_one({"id": workshop_id}, {"$set": update_doc})
-    
+
     updated = await db.workshops.find_one({"id": workshop_id}, {"_id": 0})
     return updated
 
+
 @api_router.delete("/trainer/workshops/{workshop_id}")
-async def trainer_delete_workshop(workshop_id: str, user: dict = Depends(require_trainer_or_admin)):
+async def trainer_delete_workshop(
+    workshop_id: str, user: dict = Depends(require_trainer_or_admin)
+):
     existing = await db.workshops.find_one({"id": workshop_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Workshop not found")
-    
+
     if user["role"] == "trainer" and existing.get("created_by") != user["id"]:
-        raise HTTPException(status_code=403, detail="You can only delete your own workshops")
-    
+        raise HTTPException(
+            status_code=403, detail="You can only delete your own workshops"
+        )
+
     await db.workshops.delete_one({"id": workshop_id})
     return {"message": "Workshop deleted successfully"}
 
+
 # ============== COURSE ROUTES ==============
 
+
 @api_router.get("/courses")
-async def get_courses(published_only: bool = True, user: dict = Depends(get_optional_user)):
+async def get_courses(
+    published_only: bool = True, user: dict = Depends(get_optional_user)
+):
     query = {"is_published": True} if published_only else {}
     courses = await db.courses.find(query, {"_id": 0}).to_list(100)
-    
+
     if user:
         await log_access(user["id"], "course", "list", "view")
-    
+
     return courses
+
 
 @api_router.get("/courses/{slug}")
 async def get_course_by_slug(slug: str, user: dict = Depends(get_optional_user)):
     course = await db.courses.find_one({"slug": slug}, {"_id": 0})
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-    
+
     is_enrolled = False
     if user:
         if course["id"] in user.get("enrolled_courses", []):
             is_enrolled = True
         await log_access(user["id"], "course", course["id"], "view")
-    
+
     return {**course, "is_enrolled": is_enrolled}
+
 
 @api_router.post("/courses/enroll")
 async def enroll_in_course(data: EnrollRequest, user: dict = Depends(get_current_user)):
     course = await db.courses.find_one({"id": data.course_id}, {"_id": 0})
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-    
+
     if data.course_id in user.get("enrolled_courses", []):
         raise HTTPException(status_code=400, detail="Already enrolled in this course")
-    
+
     await db.users.update_one(
-        {"id": user["id"]},
-        {"$push": {"enrolled_courses": data.course_id}}
+        {"id": user["id"]}, {"$push": {"enrolled_courses": data.course_id}}
     )
-    
-    await db.courses.update_one(
-        {"id": data.course_id},
-        {"$inc": {"enrolled_count": 1}}
-    )
-    
+
+    await db.courses.update_one({"id": data.course_id}, {"$inc": {"enrolled_count": 1}})
+
     # Initialize course progress
     now = datetime.now(timezone.utc).isoformat()
     progress_doc = {
@@ -967,22 +1101,25 @@ async def enroll_in_course(data: EnrollRequest, user: dict = Depends(get_current
         "started_at": now,
         "last_accessed": now,
         "completed": False,
-        "completed_at": None
+        "completed_at": None,
     }
     await db.course_progress.insert_one(progress_doc)
-    
+
     await log_access(user["id"], "course", data.course_id, "enroll")
-    
+
     return {"message": "Successfully enrolled in course", "course_id": data.course_id}
+
 
 @api_router.get("/my-courses")
 async def get_my_courses(user: dict = Depends(get_current_user)):
     enrolled_ids = user.get("enrolled_courses", [])
     if not enrolled_ids:
         return []
-    
-    courses = await db.courses.find({"id": {"$in": enrolled_ids}}, {"_id": 0}).to_list(100)
-    
+
+    courses = await db.courses.find({"id": {"$in": enrolled_ids}}, {"_id": 0}).to_list(
+        100
+    )
+
     # Add progress info to each course
     for course in courses:
         progress = await db.course_progress.find_one(
@@ -995,150 +1132,182 @@ async def get_my_courses(user: dict = Depends(get_current_user)):
         else:
             course["progress"] = 0
             course["completed"] = False
-    
+
     return courses
 
+
 # ============== PROGRESS TRACKING ROUTES ==============
+
 
 @api_router.get("/progress/{course_id}")
 async def get_course_progress(course_id: str, user: dict = Depends(get_current_user)):
     """Get detailed progress for a course"""
     if course_id not in user.get("enrolled_courses", []):
         raise HTTPException(status_code=403, detail="Not enrolled in this course")
-    
+
     progress = await db.course_progress.find_one(
         {"user_id": user["id"], "course_id": course_id}, {"_id": 0}
     )
-    
+
     if not progress:
         raise HTTPException(status_code=404, detail="Progress not found")
-    
+
     # Calculate overall progress
     calc = await calculate_course_progress(user["id"], course_id)
     progress["overall_progress"] = calc["progress"]
     progress["completed"] = calc["completed"]
-    
+
     # Check for certificate
     certificate = await db.certificates.find_one(
         {"user_id": user["id"], "course_id": course_id}, {"_id": 0}
     )
     progress["certificate"] = certificate
-    
+
     return progress
 
+
 @api_router.post("/progress/module/complete")
-async def mark_module_complete(data: MarkModuleCompleteRequest, user: dict = Depends(get_current_user)):
+async def mark_module_complete(
+    data: MarkModuleCompleteRequest, user: dict = Depends(get_current_user)
+):
     """Mark a module as completed"""
     if data.course_id not in user.get("enrolled_courses", []):
         raise HTTPException(status_code=403, detail="Not enrolled in this course")
-    
+
     course = await db.courses.find_one({"id": data.course_id}, {"_id": 0})
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-    
+
     # Verify module exists
     module_exists = any(m["id"] == data.module_id for m in course.get("modules", []))
     if not module_exists:
         raise HTTPException(status_code=404, detail="Module not found")
-    
+
     now = datetime.now(timezone.utc).isoformat()
-    
+
     # Update or create module progress
-    progress = await db.course_progress.find_one({"user_id": user["id"], "course_id": data.course_id})
-    
+    progress = await db.course_progress.find_one(
+        {"user_id": user["id"], "course_id": data.course_id}
+    )
+
     if progress:
         modules_progress = progress.get("modules_progress", [])
-        existing_idx = next((i for i, m in enumerate(modules_progress) if m["module_id"] == data.module_id), None)
-        
+        existing_idx = next(
+            (
+                i
+                for i, m in enumerate(modules_progress)
+                if m["module_id"] == data.module_id
+            ),
+            None,
+        )
+
         if existing_idx is not None:
             modules_progress[existing_idx]["completed"] = True
             modules_progress[existing_idx]["completed_at"] = now
-            modules_progress[existing_idx]["time_spent_minutes"] += data.time_spent_minutes
+            modules_progress[existing_idx][
+                "time_spent_minutes"
+            ] += data.time_spent_minutes
         else:
-            modules_progress.append({
-                "module_id": data.module_id,
-                "completed": True,
-                "completed_at": now,
-                "time_spent_minutes": data.time_spent_minutes
-            })
-        
+            modules_progress.append(
+                {
+                    "module_id": data.module_id,
+                    "completed": True,
+                    "completed_at": now,
+                    "time_spent_minutes": data.time_spent_minutes,
+                }
+            )
+
         await db.course_progress.update_one(
             {"user_id": user["id"], "course_id": data.course_id},
-            {"$set": {"modules_progress": modules_progress, "last_accessed": now}}
+            {"$set": {"modules_progress": modules_progress, "last_accessed": now}},
         )
-    
+
     # Check if eligible for certificate
     certificate = await check_and_issue_certificate(user["id"], data.course_id)
-    
+
     calc = await calculate_course_progress(user["id"], data.course_id)
-    
+
     return {
         "message": "Module marked as complete",
         "overall_progress": calc["progress"],
         "certificate_issued": certificate is not None,
-        "certificate": certificate
+        "certificate": certificate,
     }
+
 
 @api_router.post("/progress/quiz/submit")
 async def submit_quiz(data: SubmitQuizRequest, user: dict = Depends(get_current_user)):
     """Submit quiz answers and get score"""
     if data.course_id not in user.get("enrolled_courses", []):
         raise HTTPException(status_code=403, detail="Not enrolled in this course")
-    
+
     course = await db.courses.find_one({"id": data.course_id}, {"_id": 0})
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-    
+
     tests = course.get("tests", [])
     if not tests:
         raise HTTPException(status_code=400, detail="This course has no quiz")
-    
+
     # Get current progress
-    progress = await db.course_progress.find_one({"user_id": user["id"], "course_id": data.course_id})
+    progress = await db.course_progress.find_one(
+        {"user_id": user["id"], "course_id": data.course_id}
+    )
     if not progress:
         raise HTTPException(status_code=404, detail="Progress not found")
-    
-    quiz_progress = progress.get("quiz_progress") or {"quiz_id": data.course_id, "attempts": [], "best_score": 0, "passed": False}
-    
+
+    quiz_progress = progress.get("quiz_progress") or {
+        "quiz_id": data.course_id,
+        "attempts": [],
+        "best_score": 0,
+        "passed": False,
+    }
+
     # Check attempt limit
     if len(quiz_progress.get("attempts", [])) >= MAX_QUIZ_ATTEMPTS:
-        raise HTTPException(status_code=400, detail=f"Maximum {MAX_QUIZ_ATTEMPTS} attempts reached")
-    
+        raise HTTPException(
+            status_code=400, detail=f"Maximum {MAX_QUIZ_ATTEMPTS} attempts reached"
+        )
+
     # Calculate score
     correct = 0
     total = len(tests)
-    
+
     for test in tests:
         user_answer = data.answers.get(test["id"])
         if user_answer is not None and user_answer == test["correct_answer"]:
             correct += 1
-    
+
     score = (correct / total * 100) if total > 0 else 0
     passed = score >= PASS_SCORE
-    
+
     now = datetime.now(timezone.utc).isoformat()
     attempt = {
         "attempt_number": len(quiz_progress.get("attempts", [])) + 1,
         "score": score,
         "answers": data.answers,
         "submitted_at": now,
-        "passed": passed
+        "passed": passed,
     }
-    
+
     quiz_progress["attempts"].append(attempt)
     quiz_progress["best_score"] = max(quiz_progress.get("best_score", 0), score)
     quiz_progress["passed"] = quiz_progress.get("passed", False) or passed
-    
+
     await db.course_progress.update_one(
         {"user_id": user["id"], "course_id": data.course_id},
-        {"$set": {"quiz_progress": quiz_progress, "last_accessed": now}}
+        {"$set": {"quiz_progress": quiz_progress, "last_accessed": now}},
     )
-    
+
     # Check if eligible for certificate
-    certificate = await check_and_issue_certificate(user["id"], data.course_id) if passed else None
-    
+    certificate = (
+        await check_and_issue_certificate(user["id"], data.course_id)
+        if passed
+        else None
+    )
+
     attempts_remaining = MAX_QUIZ_ATTEMPTS - len(quiz_progress["attempts"])
-    
+
     return {
         "score": score,
         "passed": passed,
@@ -1147,8 +1316,9 @@ async def submit_quiz(data: SubmitQuizRequest, user: dict = Depends(get_current_
         "best_score": quiz_progress["best_score"],
         "attempts_remaining": attempts_remaining,
         "certificate_issued": certificate is not None,
-        "certificate": certificate
+        "certificate": certificate,
     }
+
 
 # ============== FILE UPLOAD ROUTES ==============
 
@@ -1158,23 +1328,28 @@ async def submit_quiz(data: SubmitQuizRequest, user: dict = Depends(get_current_
 ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"]
 MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
 
+
 @api_router.post("/upload/image")
 async def upload_image(
-    file: UploadFile = File(...),
-    user: dict = Depends(require_trainer_or_admin)
+    file: UploadFile = File(...), user: dict = Depends(require_trainer_or_admin)
 ):
     """Upload an image file for course/workshop banners"""
     if file.content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: JPEG, PNG, WebP, GIF")
-    
+        raise HTTPException(
+            status_code=400, detail=f"Invalid file type. Allowed: JPEG, PNG, WebP, GIF"
+        )
+
     # Check file size
     file.file.seek(0, 2)
     size = file.file.tell()
     file.file.seek(0)
-    
+
     if size > MAX_IMAGE_SIZE:
-        raise HTTPException(status_code=400, detail=f"File too large. Max size: {MAX_IMAGE_SIZE // (1024*1024)}MB")
-    
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Max size: {MAX_IMAGE_SIZE // (1024*1024)}MB",
+        )
+
     try:
         result = await storage_service.upload_file(file, "images")
         logger.info(f"Image uploaded: {result['url']} by user {user['id']}")
@@ -1183,23 +1358,28 @@ async def upload_image(
         logger.error(f"Upload failed: {str(e)}")
         raise HTTPException(status_code=500, detail="File upload failed")
 
+
 @api_router.post("/upload/video")
 async def upload_video(
-    file: UploadFile = File(...),
-    user: dict = Depends(require_trainer_or_admin)
+    file: UploadFile = File(...), user: dict = Depends(require_trainer_or_admin)
 ):
     """Upload a video file for course modules"""
     if file.content_type not in ALLOWED_VIDEO_TYPES:
-        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {ALLOWED_VIDEO_TYPES}")
-    
+        raise HTTPException(
+            status_code=400, detail=f"Invalid file type. Allowed: {ALLOWED_VIDEO_TYPES}"
+        )
+
     # Check file size
     file.file.seek(0, 2)  # Seek to end
     size = file.file.tell()
     file.file.seek(0)  # Reset
-    
+
     if size > MAX_VIDEO_SIZE:
-        raise HTTPException(status_code=400, detail=f"File too large. Max size: {MAX_VIDEO_SIZE // (1024*1024)}MB")
-    
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Max size: {MAX_VIDEO_SIZE // (1024*1024)}MB",
+        )
+
     try:
         result = await storage_service.upload_file(file, "videos")
         logger.info(f"Video uploaded: {result['url']} by user {user['id']}")
@@ -1208,22 +1388,27 @@ async def upload_video(
         logger.error(f"Upload failed: {str(e)}")
         raise HTTPException(status_code=500, detail="File upload failed")
 
+
 @api_router.post("/upload/document")
 async def upload_document(
-    file: UploadFile = File(...),
-    user: dict = Depends(require_trainer_or_admin)
+    file: UploadFile = File(...), user: dict = Depends(require_trainer_or_admin)
 ):
     """Upload a document file for course materials"""
     if file.content_type not in ALLOWED_DOC_TYPES:
-        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: PDF, PPTX, DOCX")
-    
+        raise HTTPException(
+            status_code=400, detail=f"Invalid file type. Allowed: PDF, PPTX, DOCX"
+        )
+
     file.file.seek(0, 2)
     size = file.file.tell()
     file.file.seek(0)
-    
+
     if size > MAX_DOC_SIZE:
-        raise HTTPException(status_code=400, detail=f"File too large. Max size: {MAX_DOC_SIZE // (1024*1024)}MB")
-    
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Max size: {MAX_DOC_SIZE // (1024*1024)}MB",
+        )
+
     try:
         result = await storage_service.upload_file(file, "documents")
         logger.info(f"Document uploaded: {result['url']} by user {user['id']}")
@@ -1232,91 +1417,113 @@ async def upload_document(
         logger.error(f"Upload failed: {str(e)}")
         raise HTTPException(status_code=500, detail="File upload failed")
 
+
 # ============== ASSIGNMENT ROUTES ==============
 
+
 @api_router.get("/courses/{course_id}/assignments")
-async def get_course_assignments(course_id: str, user: dict = Depends(get_current_user)):
+async def get_course_assignments(
+    course_id: str, user: dict = Depends(get_current_user)
+):
     """Get all assignments for a course"""
-    assignments = await db.assignments.find({"course_id": course_id}, {"_id": 0}).to_list(100)
-    
+    assignments = await db.assignments.find(
+        {"course_id": course_id}, {"_id": 0}
+    ).to_list(100)
+
     # Add submission status for current user
     for assignment in assignments:
         submission = await db.submissions.find_one(
             {"assignment_id": assignment["id"], "user_id": user["id"]}, {"_id": 0}
         )
         assignment["submission"] = submission
-    
+
     return assignments
 
+
 @api_router.post("/assignments")
-async def create_assignment(data: AssignmentCreate, user: dict = Depends(require_trainer_or_admin)):
+async def create_assignment(
+    data: AssignmentCreate, user: dict = Depends(require_trainer_or_admin)
+):
     """Create a new assignment for a course"""
     course = await db.courses.find_one({"id": data.course_id})
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-    
+
     # Trainers can only add to their own courses
     if user["role"] == "trainer" and course.get("created_by") != user["id"]:
-        raise HTTPException(status_code=403, detail="You can only add assignments to your own courses")
-    
+        raise HTTPException(
+            status_code=403, detail="You can only add assignments to your own courses"
+        )
+
     now = datetime.now(timezone.utc).isoformat()
     assignment_doc = {
         "id": str(uuid.uuid4()),
         **data.model_dump(),
         "created_at": now,
-        "created_by": user["id"]
+        "created_by": user["id"],
     }
-    
+
     await db.assignments.insert_one(assignment_doc)
     if "_id" in assignment_doc:
         del assignment_doc["_id"]
-    
+
     return assignment_doc
 
+
 @api_router.delete("/assignments/{assignment_id}")
-async def delete_assignment(assignment_id: str, user: dict = Depends(require_trainer_or_admin)):
+async def delete_assignment(
+    assignment_id: str, user: dict = Depends(require_trainer_or_admin)
+):
     """Delete an assignment"""
     assignment = await db.assignments.find_one({"id": assignment_id})
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
-    
+
     if user["role"] == "trainer" and assignment.get("created_by") != user["id"]:
-        raise HTTPException(status_code=403, detail="You can only delete your own assignments")
-    
+        raise HTTPException(
+            status_code=403, detail="You can only delete your own assignments"
+        )
+
     await db.assignments.delete_one({"id": assignment_id})
     return {"message": "Assignment deleted"}
+
 
 @api_router.post("/assignments/{assignment_id}/submit")
 async def submit_assignment(
     assignment_id: str,
     notes: str = Form(""),
     file: UploadFile = File(...),
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(get_current_user),
 ):
     """Submit an assignment with file upload"""
     assignment = await db.assignments.find_one({"id": assignment_id}, {"_id": 0})
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
-    
+
     # Check if user is enrolled in the course
     if assignment["course_id"] not in user.get("enrolled_courses", []):
         raise HTTPException(status_code=403, detail="Not enrolled in this course")
-    
+
     # Check for existing submission
-    existing = await db.submissions.find_one({"assignment_id": assignment_id, "user_id": user["id"]})
+    existing = await db.submissions.find_one(
+        {"assignment_id": assignment_id, "user_id": user["id"]}
+    )
     if existing:
-        raise HTTPException(status_code=400, detail="Assignment already submitted. Contact instructor to resubmit.")
-    
+        raise HTTPException(
+            status_code=400,
+            detail="Assignment already submitted. Contact instructor to resubmit.",
+        )
+
     # Save file
     ext = Path(file.filename).suffix
     unique_name = f"{uuid.uuid4()}{ext}"
     file_path = UPLOAD_DIR / "assignments" / unique_name
-    
+
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    
+
     file_url = f"/uploads/assignments/{unique_name}"
-    
+
     now = datetime.now(timezone.utc).isoformat()
     submission_doc = {
         "id": str(uuid.uuid4()),
@@ -1329,108 +1536,140 @@ async def submit_assignment(
         "grade": None,
         "feedback": None,
         "graded_at": None,
-        "graded_by": None
+        "graded_by": None,
     }
-    
+
     await db.submissions.insert_one(submission_doc)
     if "_id" in submission_doc:
         del submission_doc["_id"]
-    
+
     return submission_doc
 
+
 @api_router.get("/assignments/{assignment_id}/submissions")
-async def get_assignment_submissions(assignment_id: str, user: dict = Depends(require_trainer_or_admin)):
+async def get_assignment_submissions(
+    assignment_id: str, user: dict = Depends(require_trainer_or_admin)
+):
     """Get all submissions for an assignment (trainer/admin only)"""
     assignment = await db.assignments.find_one({"id": assignment_id})
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
-    
+
     if user["role"] == "trainer" and assignment.get("created_by") != user["id"]:
-        raise HTTPException(status_code=403, detail="You can only view submissions for your own assignments")
-    
-    submissions = await db.submissions.find({"assignment_id": assignment_id}, {"_id": 0}).to_list(100)
-    
+        raise HTTPException(
+            status_code=403,
+            detail="You can only view submissions for your own assignments",
+        )
+
+    submissions = await db.submissions.find(
+        {"assignment_id": assignment_id}, {"_id": 0}
+    ).to_list(100)
+
     # Add user info to each submission
     for sub in submissions:
-        sub_user = await db.users.find_one({"id": sub["user_id"]}, {"_id": 0, "password_hash": 0})
+        sub_user = await db.users.find_one(
+            {"id": sub["user_id"]}, {"_id": 0, "password_hash": 0}
+        )
         if sub_user:
             sub["user_name"] = f"{sub_user['first_name']} {sub_user['last_name']}"
             sub["user_email"] = sub_user["email"]
-    
+
     return submissions
 
+
 @api_router.put("/submissions/{submission_id}/grade")
-async def grade_submission(submission_id: str, data: GradeSubmission, user: dict = Depends(require_trainer_or_admin)):
+async def grade_submission(
+    submission_id: str,
+    data: GradeSubmission,
+    user: dict = Depends(require_trainer_or_admin),
+):
     """Grade an assignment submission"""
     submission = await db.submissions.find_one({"id": submission_id})
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
-    
+
     assignment = await db.assignments.find_one({"id": submission["assignment_id"]})
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
-    
+
     if user["role"] == "trainer" and assignment.get("created_by") != user["id"]:
-        raise HTTPException(status_code=403, detail="You can only grade submissions for your own assignments")
-    
+        raise HTTPException(
+            status_code=403,
+            detail="You can only grade submissions for your own assignments",
+        )
+
     if data.grade < 0 or data.grade > assignment.get("max_score", 100):
-        raise HTTPException(status_code=400, detail=f"Grade must be between 0 and {assignment.get('max_score', 100)}")
-    
+        raise HTTPException(
+            status_code=400,
+            detail=f"Grade must be between 0 and {assignment.get('max_score', 100)}",
+        )
+
     now = datetime.now(timezone.utc).isoformat()
     await db.submissions.update_one(
         {"id": submission_id},
-        {"$set": {
-            "grade": data.grade,
-            "feedback": data.feedback,
-            "graded_at": now,
-            "graded_by": user["id"]
-        }}
+        {
+            "$set": {
+                "grade": data.grade,
+                "feedback": data.feedback,
+                "graded_at": now,
+                "graded_by": user["id"],
+            }
+        },
     )
-    
+
     # Check if student now qualifies for certificate
     student_id = submission["user_id"]
     course_id = assignment["course_id"]
     certificate = await check_and_issue_certificate(student_id, course_id)
-    
+
     updated = await db.submissions.find_one({"id": submission_id}, {"_id": 0})
     updated["certificate_issued"] = certificate is not None
-    
+
     return updated
 
+
 # ============== CERTIFICATE ROUTES ==============
+
 
 @api_router.get("/certificates")
 async def get_my_certificates(user: dict = Depends(get_current_user)):
     """Get all certificates for current user"""
-    certificates = await db.certificates.find({"user_id": user["id"]}, {"_id": 0}).to_list(100)
+    certificates = await db.certificates.find(
+        {"user_id": user["id"]}, {"_id": 0}
+    ).to_list(100)
     return certificates
+
 
 @api_router.get("/certificates/{certificate_id}")
 async def get_certificate(certificate_id: str, user: dict = Depends(get_optional_user)):
     """Get certificate details - public for verification"""
     certificate = await db.certificates.find_one(
         {"$or": [{"id": certificate_id}, {"certificate_number": certificate_id}]},
-        {"_id": 0}
+        {"_id": 0},
     )
     if not certificate:
         raise HTTPException(status_code=404, detail="Certificate not found")
     return certificate
 
+
 @api_router.get("/certificates/verify/{certificate_number}")
 async def verify_certificate(certificate_number: str):
     """Verify a certificate by its number - public endpoint"""
-    certificate = await db.certificates.find_one({"certificate_number": certificate_number}, {"_id": 0})
+    certificate = await db.certificates.find_one(
+        {"certificate_number": certificate_number}, {"_id": 0}
+    )
     if not certificate:
         return {"valid": False, "message": "Certificate not found"}
-    
+
     return {
         "valid": True,
         "certificate_number": certificate["certificate_number"],
         "user_name": certificate["user_name"],
         "course_title": certificate["course_title"],
         "issued_at": certificate["issued_at"],
-        "quiz_score": certificate["quiz_score"]
+        "quiz_score": certificate["quiz_score"],
     }
+
 
 # Trainer Course Management
 @api_router.get("/trainer/courses")
@@ -1439,91 +1678,112 @@ async def get_trainer_courses(user: dict = Depends(require_trainer_or_admin)):
     if user["role"] == "admin":
         courses = await db.courses.find({}, {"_id": 0}).to_list(100)
     else:
-        courses = await db.courses.find({"created_by": user["id"]}, {"_id": 0}).to_list(100)
+        courses = await db.courses.find({"created_by": user["id"]}, {"_id": 0}).to_list(
+            100
+        )
     return courses
 
+
 @api_router.post("/trainer/courses")
-async def trainer_create_course(course_data: CourseCreate, user: dict = Depends(require_trainer_or_admin)):
+async def trainer_create_course(
+    course_data: CourseCreate, user: dict = Depends(require_trainer_or_admin)
+):
     existing = await db.courses.find_one({"slug": course_data.slug})
     if existing:
-        raise HTTPException(status_code=400, detail="Course with this slug already exists")
-    
+        raise HTTPException(
+            status_code=400, detail="Course with this slug already exists"
+        )
+
     course_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    
+
     course_doc = {
         "id": course_id,
         **course_data.model_dump(),
         "enrolled_count": 0,
         "created_at": now,
         "updated_at": now,
-        "created_by": user["id"]
+        "created_by": user["id"],
     }
-    
+
     await db.courses.insert_one(course_doc)
     if "_id" in course_doc:
         del course_doc["_id"]
     return course_doc
 
+
 @api_router.put("/trainer/courses/{course_id}")
-async def trainer_update_course(course_id: str, course_data: CourseUpdate, user: dict = Depends(require_trainer_or_admin)):
+async def trainer_update_course(
+    course_id: str,
+    course_data: CourseUpdate,
+    user: dict = Depends(require_trainer_or_admin),
+):
     existing = await db.courses.find_one({"id": course_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Course not found")
-    
+
     if user["role"] == "trainer" and existing.get("created_by") != user["id"]:
-        raise HTTPException(status_code=403, detail="You can only edit your own courses")
-    
+        raise HTTPException(
+            status_code=403, detail="You can only edit your own courses"
+        )
+
     update_doc = {"updated_at": datetime.now(timezone.utc).isoformat()}
-    
+
     for field, value in course_data.model_dump(exclude_unset=True).items():
         if value is not None:
             update_doc[field] = value
-    
+
     await db.courses.update_one({"id": course_id}, {"$set": update_doc})
     updated = await db.courses.find_one({"id": course_id}, {"_id": 0})
     return updated
 
+
 @api_router.delete("/trainer/courses/{course_id}")
-async def trainer_delete_course(course_id: str, user: dict = Depends(require_trainer_or_admin)):
+async def trainer_delete_course(
+    course_id: str, user: dict = Depends(require_trainer_or_admin)
+):
     existing = await db.courses.find_one({"id": course_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Course not found")
-    
+
     if user["role"] == "trainer" and existing.get("created_by") != user["id"]:
-        raise HTTPException(status_code=403, detail="You can only delete your own courses")
-    
+        raise HTTPException(
+            status_code=403, detail="You can only delete your own courses"
+        )
+
     await db.courses.delete_one({"id": course_id})
     return {"message": "Course deleted successfully"}
 
+
 # ============== OPEN SOURCE LEARNING PATHS ==============
+
 
 @api_router.get("/open-source/paths")
 async def get_learning_paths(user: dict = Depends(get_current_user)):
     """Get learning paths for the current user only"""
     # Only return paths created by this user
-    paths = await db.learning_paths.find(
-        {"user_id": user["id"]}, 
-        {"_id": 0}
-    ).to_list(100)
-    
+    paths = await db.learning_paths.find({"user_id": user["id"]}, {"_id": 0}).to_list(
+        100
+    )
+
     await log_access(user["id"], "open_source", "list", "view")
-    
+
     return paths
+
 
 @api_router.get("/open-source/paths/{path_id}")
 async def get_learning_path(path_id: str, user: dict = Depends(get_current_user)):
     """Get a specific learning path - only if owned by user"""
     path = await db.learning_paths.find_one(
-        {"id": path_id, "user_id": user["id"]}, 
-        {"_id": 0}
+        {"id": path_id, "user_id": user["id"]}, {"_id": 0}
     )
     if not path:
         raise HTTPException(status_code=404, detail="Learning path not found")
-    
+
     await log_access(user["id"], "open_source", path_id, "view")
-    
+
     return path
+
 
 @api_router.delete("/open-source/paths/{path_id}")
 async def delete_my_learning_path(path_id: str, user: dict = Depends(get_current_user)):
@@ -1533,11 +1793,14 @@ async def delete_my_learning_path(path_id: str, user: dict = Depends(get_current
         raise HTTPException(status_code=404, detail="Learning path not found")
     return {"message": "Learning path deleted"}
 
+
 @api_router.post("/open-source/generate")
-async def generate_learning_path(request: GeneratePathRequest, user: dict = Depends(get_current_user)):
+async def generate_learning_path(
+    request: GeneratePathRequest, user: dict = Depends(get_current_user)
+):
     """Generate an AI-powered learning path for a specific skill - requires login"""
     client = get_openai_client()
-    
+
     system_message = """You are an expert learning path curator. Generate comprehensive learning roadmaps using FREE open-source resources.
         
 Your response must be valid JSON with this exact structure:
@@ -1564,13 +1827,13 @@ Your response must be valid JSON with this exact structure:
 }
 
 Use REAL URLs from YouTube, freeCodeCamp, Official docs, GitHub, Medium/Dev.to."""
-    
+
     prompt = f"""Create a detailed learning path for: {request.skill_name}
 Industry context: {request.industry}
 Current level: {request.current_level}
 
 Generate a 4-8 week roadmap with specific, real open-source resources."""
-    
+
     try:
         if not OPENAI_API_KEY or OPENAI_API_KEY == "your_openai_key":
             raise Exception("OpenAI API key not configured")
@@ -1579,14 +1842,14 @@ Generate a 4-8 week roadmap with specific, real open-source resources."""
             model=OPENAI_MODEL,
             messages=[
                 {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt},
             ],
             response_format={"type": "json_object"},
-            temperature=0.7
+            temperature=0.7,
         )
-        
+
         response_text = completion.choices[0].message.content or ""
-        
+
         try:
             clean_response = response_text.strip()
             if clean_response.startswith("```json"):
@@ -1595,11 +1858,11 @@ Generate a 4-8 week roadmap with specific, real open-source resources."""
                 clean_response = clean_response[3:]
             if clean_response.endswith("```"):
                 clean_response = clean_response[:-3]
-            
+
             path_data = json.loads(clean_response.strip())
         except json.JSONDecodeError:
             raise Exception("Invalid JSON response from AI")
-            
+
     except Exception as e:
         logger.warning(f"AI generation failed ({str(e)}). Using fallback template.")
         # Fallback template for when AI is unavailable
@@ -1617,46 +1880,46 @@ Generate a 4-8 week roadmap with specific, real open-source resources."""
                             "url": "https://docs.python.org/3/",
                             "type": "documentation",
                             "duration": "2 hours",
-                            "description": "Official guide and reference"
+                            "description": "Official guide and reference",
                         },
                         {
                             "title": "Crash Course Video",
-                            "url": "https://www.youtube.com/watch?v=rfscVS0vtbw", # Python crash course example
+                            "url": "https://www.youtube.com/watch?v=rfscVS0vtbw",  # Python crash course example
                             "type": "video",
                             "duration": "1 hour",
-                            "description": "Fast-paced introduction"
-                        }
+                            "description": "Fast-paced introduction",
+                        },
                     ],
-                    "skills_covered": ["Basics", "Setup", "Syntax"]
+                    "skills_covered": ["Basics", "Setup", "Syntax"],
                 },
                 {
                     "week": 2,
                     "title": "Intermediate Concepts",
                     "description": "Deep dive into core features",
                     "resources": [],
-                    "skills_covered": ["Data Structures", "Functions"]
+                    "skills_covered": ["Data Structures", "Functions"],
                 },
                 {
                     "week": 3,
                     "title": "Advanced Topics",
                     "description": "Complex patterns and best practices",
                     "resources": [],
-                    "skills_covered": ["Async/Await", "Decorators"]
+                    "skills_covered": ["Async/Await", "Decorators"],
                 },
                 {
                     "week": 4,
                     "title": "Final Project",
                     "description": "Build a real-world application",
                     "resources": [],
-                    "skills_covered": ["Project Management", "Deployment"]
-                }
-            ]
+                    "skills_covered": ["Project Management", "Deployment"],
+                },
+            ],
         }
 
     try:
         path_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
-        
+
         path_doc = {
             "id": path_id,
             "skill_name": request.skill_name,
@@ -1666,75 +1929,85 @@ Generate a 4-8 week roadmap with specific, real open-source resources."""
             "estimated_weeks": path_data.get("estimated_weeks", 6),
             "steps": path_data.get("steps", []),
             "created_at": now,
-            "generated_by": "ai" if "Fallback" not in path_data.get("description", "") else "fallback",
-            "user_id": user["id"]
+            "generated_by": (
+                "ai"
+                if "Fallback" not in path_data.get("description", "")
+                else "fallback"
+            ),
+            "user_id": user["id"],
         }
-        
+
         await db.learning_paths.insert_one(path_doc)
         if "_id" in path_doc:
             del path_doc["_id"]
-        
+
         await log_access(user["id"], "open_source", path_id, "generate")
-        
+
         return path_doc
-        
+
     except Exception as e:
         logger.error(f"Failed to save learning path: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to save learning path: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to save learning path: {str(e)}"
+        )
+
 
 # ============== LABS ROUTES ==============
 
+
 @api_router.get("/labs")
-async def get_labs(published_only: bool = True, user: dict = Depends(get_optional_user)):
+async def get_labs(
+    published_only: bool = True, user: dict = Depends(get_optional_user)
+):
     query = {"is_published": True} if published_only else {}
     labs = await db.labs.find(query, {"_id": 0}).to_list(100)
-    
+
     if user:
         await log_access(user["id"], "lab", "list", "view")
-    
+
     return labs
+
 
 @api_router.get("/labs/{slug}")
 async def get_lab_by_slug(slug: str, user: dict = Depends(get_optional_user)):
     lab = await db.labs.find_one({"slug": slug}, {"_id": 0})
     if not lab:
         raise HTTPException(status_code=404, detail="Lab not found")
-    
+
     is_completed = False
     if user:
         if lab["id"] in user.get("completed_labs", []):
             is_completed = True
         await log_access(user["id"], "lab", lab["id"], "view")
-    
+
     return {**lab, "is_completed": is_completed}
+
 
 @api_router.post("/labs/{lab_id}/start")
 async def start_lab(lab_id: str, user: dict = Depends(get_current_user)):
     lab = await db.labs.find_one({"id": lab_id}, {"_id": 0})
     if not lab:
         raise HTTPException(status_code=404, detail="Lab not found")
-    
+
     await log_access(user["id"], "lab", lab_id, "start")
     return {"message": "Lab started", "lab_id": lab_id}
+
 
 @api_router.post("/labs/{lab_id}/complete")
 async def complete_lab(lab_id: str, user: dict = Depends(get_current_user)):
     lab = await db.labs.find_one({"id": lab_id}, {"_id": 0})
     if not lab:
         raise HTTPException(status_code=404, detail="Lab not found")
-    
+
     if lab_id not in user.get("completed_labs", []):
         await db.users.update_one(
-            {"id": user["id"]},
-            {"$push": {"completed_labs": lab_id}}
+            {"id": user["id"]}, {"$push": {"completed_labs": lab_id}}
         )
-        await db.labs.update_one(
-            {"id": lab_id},
-            {"$inc": {"completions_count": 1}}
-        )
-    
+        await db.labs.update_one({"id": lab_id}, {"$inc": {"completions_count": 1}})
+
     await log_access(user["id"], "lab", lab_id, "complete")
     return {"message": "Lab marked as completed", "lab_id": lab_id}
+
 
 # Interactive Lab Simulation (LLM-powered)
 class LabExecuteRequest(BaseModel):
@@ -1743,25 +2016,28 @@ class LabExecuteRequest(BaseModel):
     code: str
     execution_type: str = "terminal"  # terminal, python, sql, upload
 
+
 @api_router.post("/labs/execute")
-async def execute_lab_code(request: LabExecuteRequest, user: dict = Depends(get_current_user)):
+async def execute_lab_code(
+    request: LabExecuteRequest, user: dict = Depends(get_current_user)
+):
     """Execute code in the interactive lab environment (LLM-simulated)"""
     client = get_openai_client()
-    
+
     lab = await db.labs.find_one({"id": request.lab_id}, {"_id": 0})
     if not lab:
         raise HTTPException(status_code=404, detail="Lab not found")
-    
+
     # Find the current step
     current_step = None
     for step in lab.get("steps", []):
         if step["id"] == request.step_id:
             current_step = step
             break
-    
+
     if not current_step:
         raise HTTPException(status_code=404, detail="Step not found")
-    
+
     # Build context for LLM
     system_prompt = f"""You are a coding environment simulator for an educational platform. You simulate the execution of code and commands.
 
@@ -1788,20 +2064,23 @@ Respond with a JSON object:
     "hints": ["helpful hint if needed"],
     "step_complete": true/false (whether this step's objective is achieved)
 }}"""
-    
+
     try:
         completion = await client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Execute this {request.execution_type} code:\n```\n{request.code}\n```"}
+                {
+                    "role": "user",
+                    "content": f"Execute this {request.execution_type} code:\n```\n{request.code}\n```",
+                },
             ],
             response_format={"type": "json_object"},
-            temperature=0.5
+            temperature=0.5,
         )
-        
+
         response_text = completion.choices[0].message.content or ""
-        
+
         # Parse the JSON response
         try:
             clean_response = response_text.strip()
@@ -1811,7 +2090,7 @@ Respond with a JSON object:
                 clean_response = clean_response[3:]
             if clean_response.endswith("```"):
                 clean_response = clean_response[:-3]
-            
+
             result = json.loads(clean_response.strip())
         except json.JSONDecodeError:
             result = {
@@ -1819,14 +2098,16 @@ Respond with a JSON object:
                 "output": response_text,
                 "error": None,
                 "hints": [],
-                "step_complete": False
+                "step_complete": False,
             }
-        
+
         # Log the lab activity
-        await log_access(user["id"], "lab", request.lab_id, f"execute_{request.step_id}")
-        
+        await log_access(
+            user["id"], "lab", request.lab_id, f"execute_{request.step_id}"
+        )
+
         return result
-        
+
     except Exception as e:
         logger.error(f"Lab execution error: {str(e)}")
         return {
@@ -1834,29 +2115,38 @@ Respond with a JSON object:
             "output": "",
             "error": f"Simulation error: {str(e)}",
             "hints": ["Try checking your syntax", "Review the step instructions"],
-            "step_complete": False
+            "step_complete": False,
         }
 
+
 @api_router.post("/labs/{lab_id}/save-progress")
-async def save_lab_progress(lab_id: str, step_id: str = "", user: dict = Depends(get_current_user)):
+async def save_lab_progress(
+    lab_id: str, step_id: str = "", user: dict = Depends(get_current_user)
+):
     """Save user's progress in a lab"""
     lab = await db.labs.find_one({"id": lab_id})
     if not lab:
         raise HTTPException(status_code=404, detail="Lab not found")
-    
+
     now = datetime.now(timezone.utc).isoformat()
-    
+
     # Update or create lab progress
     progress = await db.lab_progress.find_one({"user_id": user["id"], "lab_id": lab_id})
-    
+
     if progress:
         completed_steps = progress.get("completed_steps", [])
         if step_id and step_id not in completed_steps:
             completed_steps.append(step_id)
-        
+
         await db.lab_progress.update_one(
             {"user_id": user["id"], "lab_id": lab_id},
-            {"$set": {"completed_steps": completed_steps, "last_step": step_id, "updated_at": now}}
+            {
+                "$set": {
+                    "completed_steps": completed_steps,
+                    "last_step": step_id,
+                    "updated_at": now,
+                }
+            },
         )
     else:
         progress_doc = {
@@ -1866,20 +2156,21 @@ async def save_lab_progress(lab_id: str, step_id: str = "", user: dict = Depends
             "completed_steps": [step_id] if step_id else [],
             "last_step": step_id,
             "started_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         await db.lab_progress.insert_one(progress_doc)
-    
+
     return {"message": "Progress saved", "step_id": step_id}
+
 
 @api_router.get("/labs/{lab_id}/progress")
 async def get_lab_progress(lab_id: str, user: dict = Depends(get_current_user)):
     """Get user's progress in a lab"""
     progress = await db.lab_progress.find_one(
-        {"user_id": user["id"], "lab_id": lab_id},
-        {"_id": 0}
+        {"user_id": user["id"], "lab_id": lab_id}, {"_id": 0}
     )
     return progress or {"completed_steps": [], "last_step": None}
+
 
 # Trainer Lab Management
 @api_router.get("/trainer/labs")
@@ -1890,56 +2181,67 @@ async def get_trainer_labs(user: dict = Depends(require_trainer_or_admin)):
         labs = await db.labs.find({"created_by": user["id"]}, {"_id": 0}).to_list(100)
     return labs
 
+
 @api_router.post("/trainer/labs")
-async def trainer_create_lab(lab_data: LabCreate, user: dict = Depends(require_trainer_or_admin)):
+async def trainer_create_lab(
+    lab_data: LabCreate, user: dict = Depends(require_trainer_or_admin)
+):
     existing = await db.labs.find_one({"slug": lab_data.slug})
     if existing:
         raise HTTPException(status_code=400, detail="Lab with this slug already exists")
-    
+
     lab_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    
+
     lab_doc = {
         "id": lab_id,
         **lab_data.model_dump(),
         "completions_count": 0,
         "created_at": now,
-        "created_by": user["id"]
+        "created_by": user["id"],
     }
-    
+
     await db.labs.insert_one(lab_doc)
     if "_id" in lab_doc:
         del lab_doc["_id"]
     return lab_doc
 
+
 @api_router.put("/trainer/labs/{lab_id}")
-async def trainer_update_lab(lab_id: str, lab_data: LabCreate, user: dict = Depends(require_trainer_or_admin)):
+async def trainer_update_lab(
+    lab_id: str, lab_data: LabCreate, user: dict = Depends(require_trainer_or_admin)
+):
     existing = await db.labs.find_one({"id": lab_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Lab not found")
-    
+
     if user["role"] == "trainer" and existing.get("created_by") != user["id"]:
         raise HTTPException(status_code=403, detail="You can only edit your own labs")
-    
+
     update_doc = lab_data.model_dump()
     await db.labs.update_one({"id": lab_id}, {"$set": update_doc})
-    
+
     updated = await db.labs.find_one({"id": lab_id}, {"_id": 0})
     return updated
 
+
 @api_router.delete("/trainer/labs/{lab_id}")
-async def trainer_delete_lab(lab_id: str, user: dict = Depends(require_trainer_or_admin)):
+async def trainer_delete_lab(
+    lab_id: str, user: dict = Depends(require_trainer_or_admin)
+):
     existing = await db.labs.find_one({"id": lab_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Lab not found")
-    
+
     if user["role"] == "trainer" and existing.get("created_by") != user["id"]:
         raise HTTPException(status_code=403, detail="You can only delete your own labs")
-    
+
     await db.labs.delete_one({"id": lab_id})
     return {"message": "Lab deleted successfully"}
 
+
 # ============== ADMIN ROUTES ==============
+
 
 @api_router.get("/admin/stats")
 async def get_admin_stats(admin: dict = Depends(require_admin)):
@@ -1953,21 +2255,17 @@ async def get_admin_stats(admin: dict = Depends(require_admin)):
     published_courses = await db.courses.count_documents({"is_published": True})
     published_labs = await db.labs.count_documents({"is_published": True})
     active_workshops = await db.workshops.count_documents({"is_active": True})
-    
+
     # Get total enrollments
-    pipeline = [
-        {"$group": {"_id": None, "total": {"$sum": "$enrolled_count"}}}
-    ]
+    pipeline = [{"$group": {"_id": None, "total": {"$sum": "$enrolled_count"}}}]
     enrollment_result = await db.courses.aggregate(pipeline).to_list(1)
     total_enrollments = enrollment_result[0]["total"] if enrollment_result else 0
-    
+
     # Get total lab completions
-    pipeline = [
-        {"$group": {"_id": None, "total": {"$sum": "$completions_count"}}}
-    ]
+    pipeline = [{"$group": {"_id": None, "total": {"$sum": "$completions_count"}}}]
     completion_result = await db.labs.aggregate(pipeline).to_list(1)
     total_completions = completion_result[0]["total"] if completion_result else 0
-    
+
     return {
         "total_users": total_users,
         "total_learners": total_learners,
@@ -1980,129 +2278,163 @@ async def get_admin_stats(admin: dict = Depends(require_admin)):
         "published_labs": published_labs,
         "total_learning_paths": total_paths,
         "total_enrollments": total_enrollments,
-        "total_lab_completions": total_completions
+        "total_lab_completions": total_completions,
     }
+
 
 @api_router.get("/admin/analytics")
 async def get_admin_analytics(admin: dict = Depends(require_admin)):
     """Get detailed analytics data for admin dashboard"""
     now = datetime.now(timezone.utc)
-    
+
     # Access logs by content type (last 30 days)
     thirty_days_ago = (now - timedelta(days=30)).isoformat()
-    
+
     pipeline = [
         {"$match": {"timestamp": {"$gte": thirty_days_ago}}},
-        {"$group": {
-            "_id": {"content_type": "$content_type", "action": "$action"},
-            "count": {"$sum": 1}
-        }}
+        {
+            "$group": {
+                "_id": {"content_type": "$content_type", "action": "$action"},
+                "count": {"$sum": 1},
+            }
+        },
     ]
     access_stats = await db.access_logs.aggregate(pipeline).to_list(100)
-    
+
     # Users by role
-    role_pipeline = [
-        {"$group": {"_id": "$role", "count": {"$sum": 1}}}
-    ]
+    role_pipeline = [{"$group": {"_id": "$role", "count": {"$sum": 1}}}]
     users_by_role = await db.users.aggregate(role_pipeline).to_list(10)
-    
+
     # Top courses by enrollment
-    top_courses = await db.courses.find(
-        {"is_published": True}, 
-        {"_id": 0, "title": 1, "enrolled_count": 1, "category": 1}
-    ).sort("enrolled_count", -1).limit(5).to_list(5)
-    
+    top_courses = (
+        await db.courses.find(
+            {"is_published": True},
+            {"_id": 0, "title": 1, "enrolled_count": 1, "category": 1},
+        )
+        .sort("enrolled_count", -1)
+        .limit(5)
+        .to_list(5)
+    )
+
     # Top labs by completions
-    top_labs = await db.labs.find(
-        {"is_published": True},
-        {"_id": 0, "title": 1, "completions_count": 1, "technology": 1}
-    ).sort("completions_count", -1).limit(5).to_list(5)
-    
+    top_labs = (
+        await db.labs.find(
+            {"is_published": True},
+            {"_id": 0, "title": 1, "completions_count": 1, "technology": 1},
+        )
+        .sort("completions_count", -1)
+        .limit(5)
+        .to_list(5)
+    )
+
     # Courses by category
-    category_pipeline = [
-        {"$group": {"_id": "$category", "count": {"$sum": 1}}}
-    ]
+    category_pipeline = [{"$group": {"_id": "$category", "count": {"$sum": 1}}}]
     courses_by_category = await db.courses.aggregate(category_pipeline).to_list(20)
-    
+
     # Recent signups (last 7 days)
     seven_days_ago = (now - timedelta(days=7)).isoformat()
-    recent_signups = await db.users.count_documents({"created_at": {"$gte": seven_days_ago}})
-    
+    recent_signups = await db.users.count_documents(
+        {"created_at": {"$gte": seven_days_ago}}
+    )
+
     return {
         "access_stats": access_stats,
         "users_by_role": users_by_role,
         "top_courses": top_courses,
         "top_labs": top_labs,
         "courses_by_category": courses_by_category,
-        "recent_signups": recent_signups
+        "recent_signups": recent_signups,
     }
+
 
 @api_router.get("/admin/users")
 async def get_all_users(admin: dict = Depends(require_admin)):
     users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(1000)
     return users
 
+
 @api_router.put("/admin/users/{user_id}/role")
-async def update_user_role(user_id: str, role_data: UserRoleUpdate, admin: dict = Depends(require_admin)):
+async def update_user_role(
+    user_id: str, role_data: UserRoleUpdate, admin: dict = Depends(require_admin)
+):
     """Update a user's role (admin only)"""
     if role_data.role not in VALID_ROLES:
-        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {VALID_ROLES}")
-    
+        raise HTTPException(
+            status_code=400, detail=f"Invalid role. Must be one of: {VALID_ROLES}"
+        )
+
     existing = await db.users.find_one({"id": user_id})
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     await db.users.update_one(
         {"id": user_id},
-        {"$set": {"role": role_data.role, "updated_at": datetime.now(timezone.utc).isoformat()}}
+        {
+            "$set": {
+                "role": role_data.role,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
     )
-    
-    updated_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+
+    updated_user = await db.users.find_one(
+        {"id": user_id}, {"_id": 0, "password_hash": 0}
+    )
     return updated_user
+
 
 @api_router.get("/admin/courses")
 async def get_all_courses(admin: dict = Depends(require_admin)):
     courses = await db.courses.find({}, {"_id": 0}).to_list(100)
     return courses
 
+
 @api_router.post("/admin/courses")
-async def admin_create_course(course_data: CourseCreate, admin: dict = Depends(require_admin)):
+async def admin_create_course(
+    course_data: CourseCreate, admin: dict = Depends(require_admin)
+):
     existing = await db.courses.find_one({"slug": course_data.slug})
     if existing:
-        raise HTTPException(status_code=400, detail="Course with this slug already exists")
-    
+        raise HTTPException(
+            status_code=400, detail="Course with this slug already exists"
+        )
+
     course_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    
+
     course_doc = {
         "id": course_id,
         **course_data.model_dump(),
         "enrolled_count": 0,
         "created_at": now,
         "updated_at": now,
-        "created_by": admin["id"]
+        "created_by": admin["id"],
     }
-    
+
     await db.courses.insert_one(course_doc)
     if "_id" in course_doc:
         del course_doc["_id"]
     return course_doc
 
+
 @api_router.put("/admin/courses/{course_id}")
-async def admin_update_course(course_id: str, course_data: CourseUpdate, admin: dict = Depends(require_admin)):
+async def admin_update_course(
+    course_id: str, course_data: CourseUpdate, admin: dict = Depends(require_admin)
+):
     existing = await db.courses.find_one({"id": course_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Course not found")
-    
+
     update_doc = {"updated_at": datetime.now(timezone.utc).isoformat()}
-    
+
     for field, value in course_data.model_dump(exclude_unset=True).items():
         if value is not None:
             update_doc[field] = value
-    
+
     await db.courses.update_one({"id": course_id}, {"$set": update_doc})
     updated = await db.courses.find_one({"id": course_id}, {"_id": 0})
     return updated
+
 
 @api_router.delete("/admin/courses/{course_id}")
 async def admin_delete_course(course_id: str, admin: dict = Depends(require_admin)):
@@ -2111,28 +2443,33 @@ async def admin_delete_course(course_id: str, admin: dict = Depends(require_admi
         raise HTTPException(status_code=404, detail="Course not found")
     return {"message": "Course deleted successfully"}
 
+
 @api_router.get("/admin/workshops")
 async def get_all_workshops(admin: dict = Depends(require_admin)):
     workshops = await db.workshops.find({}, {"_id": 0}).to_list(100)
     return workshops
 
+
 @api_router.post("/admin/workshops")
-async def admin_create_workshop(workshop_data: WorkshopCreate, admin: dict = Depends(require_admin)):
+async def admin_create_workshop(
+    workshop_data: WorkshopCreate, admin: dict = Depends(require_admin)
+):
     workshop_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    
+
     workshop_doc = {
         "id": workshop_id,
         **workshop_data.model_dump(),
         "registered_count": 0,
         "created_at": now,
-        "created_by": admin["id"]
+        "created_by": admin["id"],
     }
-    
+
     await db.workshops.insert_one(workshop_doc)
     if "_id" in workshop_doc:
         del workshop_doc["_id"]
     return workshop_doc
+
 
 @api_router.delete("/admin/workshops/{workshop_id}")
 async def admin_delete_workshop(workshop_id: str, admin: dict = Depends(require_admin)):
@@ -2141,32 +2478,35 @@ async def admin_delete_workshop(workshop_id: str, admin: dict = Depends(require_
         raise HTTPException(status_code=404, detail="Workshop not found")
     return {"message": "Workshop deleted successfully"}
 
+
 @api_router.get("/admin/labs")
 async def get_all_labs(admin: dict = Depends(require_admin)):
     labs = await db.labs.find({}, {"_id": 0}).to_list(100)
     return labs
+
 
 @api_router.post("/admin/labs")
 async def admin_create_lab(lab_data: LabCreate, admin: dict = Depends(require_admin)):
     existing = await db.labs.find_one({"slug": lab_data.slug})
     if existing:
         raise HTTPException(status_code=400, detail="Lab with this slug already exists")
-    
+
     lab_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    
+
     lab_doc = {
         "id": lab_id,
         **lab_data.model_dump(),
         "completions_count": 0,
         "created_at": now,
-        "created_by": admin["id"]
+        "created_by": admin["id"],
     }
-    
+
     await db.labs.insert_one(lab_doc)
     if "_id" in lab_doc:
         del lab_doc["_id"]
     return lab_doc
+
 
 @api_router.delete("/admin/labs/{lab_id}")
 async def admin_delete_lab(lab_id: str, admin: dict = Depends(require_admin)):
@@ -2175,32 +2515,41 @@ async def admin_delete_lab(lab_id: str, admin: dict = Depends(require_admin)):
         raise HTTPException(status_code=404, detail="Lab not found")
     return {"message": "Lab deleted successfully"}
 
+
 @api_router.delete("/admin/open-source/paths/{path_id}")
-async def admin_delete_learning_path(path_id: str, admin: dict = Depends(require_admin)):
+async def admin_delete_learning_path(
+    path_id: str, admin: dict = Depends(require_admin)
+):
     result = await db.learning_paths.delete_one({"id": path_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Learning path not found")
     return {"message": "Learning path deleted"}
 
+
 # ============== HEALTH CHECK ==============
+
 
 @api_router.get("/")
 async def root():
     return {"message": "PluralSkill API is running", "version": "4.0.0"}
 
+
 @api_router.get("/health")
 async def health():
     return {"status": "healthy"}
+
 
 # Include the router in the main app
 app.include_router(api_router)
 
 # CORS Configuration
-cors_origins_str = os.environ.get('CORS_ORIGINS', 'http://localhost:3000')
-cors_origins = [origin.strip() for origin in cors_origins_str.split(',')]
+cors_origins_str = os.environ.get("CORS_ORIGINS", "http://localhost:3000")
+cors_origins = [origin.strip() for origin in cors_origins_str.split(",")]
 
-if '*' in cors_origins:
-    logger.warning("⚠️  CORS is set to allow ALL origins. This is insecure for production!")
+if "*" in cors_origins:
+    logger.warning(
+        "⚠️  CORS is set to allow ALL origins. This is insecure for production!"
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -2210,32 +2559,60 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
 
 # Seed initial data on startup
 @app.on_event("startup")
 async def seed_data():
     now = datetime.now(timezone.utc).isoformat()
-    
+
     # Get or create admin user
     admin_user = await db.users.find_one({"email": "admin@pluralskill.com"})
     if not admin_user:
         logger.info("Creating admin user...")
-        admin_user = {"id": str(uuid.uuid4()), "email": "admin@pluralskill.com", "password_hash": hash_password("admin123"), "first_name": "Admin", "last_name": "User", "bio": "Platform Administrator", "skills": [], "role": "admin", "enrolled_courses": [], "completed_labs": [], "created_at": now, "updated_at": now}
+        admin_user = {
+            "id": str(uuid.uuid4()),
+            "email": "admin@pluralskill.com",
+            "password_hash": hash_password("admin123"),
+            "first_name": "Admin",
+            "last_name": "User",
+            "bio": "Platform Administrator",
+            "skills": [],
+            "role": "admin",
+            "enrolled_courses": [],
+            "completed_labs": [],
+            "created_at": now,
+            "updated_at": now,
+        }
         await db.users.insert_one(admin_user)
         logger.info("Admin user created")
     admin_id = admin_user["id"]
-    
+
     # Get or create trainer user
     trainer_user = await db.users.find_one({"email": "trainer@pluralskill.com"})
     if not trainer_user:
         logger.info("Creating trainer user...")
-        trainer_user = {"id": str(uuid.uuid4()), "email": "trainer@pluralskill.com", "password_hash": hash_password("trainer123"), "first_name": "Sarah", "last_name": "Trainer", "bio": "Course Instructor", "skills": ["Excel", "Power BI", "Python"], "role": "trainer", "enrolled_courses": [], "completed_labs": [], "created_at": now, "updated_at": now}
+        trainer_user = {
+            "id": str(uuid.uuid4()),
+            "email": "trainer@pluralskill.com",
+            "password_hash": hash_password("trainer123"),
+            "first_name": "Sarah",
+            "last_name": "Trainer",
+            "bio": "Course Instructor",
+            "skills": ["Excel", "Power BI", "Python"],
+            "role": "trainer",
+            "enrolled_courses": [],
+            "completed_labs": [],
+            "created_at": now,
+            "updated_at": now,
+        }
         await db.users.insert_one(trainer_user)
         logger.info("Trainer user created")
-    
+
     # Seed Workshops (created by admin)
     workshop_count = await db.workshops.count_documents({})
     if workshop_count == 0:
@@ -2247,7 +2624,13 @@ async def seed_data():
                 "slug": "ai-in-finance-fpa-ml",
                 "description": "Learn how leading financial institutions are leveraging AI for forecasting, risk assessment, and automated reporting.",
                 "speakers": [
-                    {"name": "Sarah Chen", "title": "VP of AI Strategy", "company": "Goldman Sachs", "linkedin_url": "", "bio": "Leading AI transformation in financial planning"}
+                    {
+                        "name": "Sarah Chen",
+                        "title": "VP of AI Strategy",
+                        "company": "Goldman Sachs",
+                        "linkedin_url": "",
+                        "bio": "Leading AI transformation in financial planning",
+                    }
                 ],
                 "date": "2026-02-15",
                 "duration_minutes": 90,
@@ -2259,7 +2642,7 @@ async def seed_data():
                 "registered_count": 0,
                 "is_active": True,
                 "created_by": admin_id,
-                "created_at": now
+                "created_at": now,
             },
             {
                 "id": str(uuid.uuid4()),
@@ -2267,7 +2650,13 @@ async def seed_data():
                 "slug": "data-driven-hr-analytics",
                 "description": "Industry leaders share how they use people analytics to drive retention and strategic workforce planning.",
                 "speakers": [
-                    {"name": "Jennifer Williams", "title": "Chief People Officer", "company": "Microsoft", "linkedin_url": "", "bio": "Pioneer in people analytics and workforce strategy"}
+                    {
+                        "name": "Jennifer Williams",
+                        "title": "Chief People Officer",
+                        "company": "Microsoft",
+                        "linkedin_url": "",
+                        "bio": "Pioneer in people analytics and workforce strategy",
+                    }
                 ],
                 "date": "2026-02-22",
                 "duration_minutes": 75,
@@ -2279,7 +2668,7 @@ async def seed_data():
                 "registered_count": 0,
                 "is_active": True,
                 "created_by": admin_id,
-                "created_at": now
+                "created_at": now,
             },
             {
                 "id": str(uuid.uuid4()),
@@ -2287,7 +2676,13 @@ async def seed_data():
                 "slug": "supply-chain-resilience",
                 "description": "Executives discuss how they built resilient supply chains using data analytics and AI.",
                 "speakers": [
-                    {"name": "David Kim", "title": "SVP Supply Chain", "company": "Amazon", "linkedin_url": "", "bio": "Leading logistics innovation with data-driven strategies"}
+                    {
+                        "name": "David Kim",
+                        "title": "SVP Supply Chain",
+                        "company": "Amazon",
+                        "linkedin_url": "",
+                        "bio": "Leading logistics innovation with data-driven strategies",
+                    }
                 ],
                 "date": "2026-03-01",
                 "duration_minutes": 90,
@@ -2299,12 +2694,12 @@ async def seed_data():
                 "registered_count": 0,
                 "is_active": True,
                 "created_by": admin_id,
-                "created_at": now
-            }
+                "created_at": now,
+            },
         ]
         await db.workshops.insert_many(workshops)
         logger.info(f"Seeded {len(workshops)} workshops")
-    
+
     # Seed Courses (created by admin)
     course_count = await db.courses.count_documents({})
     if course_count == 0:
@@ -2323,20 +2718,85 @@ async def seed_data():
                 "duration_hours": 25,
                 "price": 0,
                 "modules": [
-                    {"id": "m1", "title": "Financial Modeling Fundamentals", "description": "Build your first P&L model", "items": [{"title": "Lesson 1", "type": "video", "url": "https://www.youtube.com/embed/dQw4w9WgXcQ", "duration_minutes": 90}], "order": 1},
-                    {"id": "m2", "title": "Cash Flow Forecasting", "description": "Learn to predict and manage cash flows", "items": [{"title": "Lesson 1", "type": "video", "url": "https://www.youtube.com/embed/dQw4w9WgXcQ", "duration_minutes": 120}], "order": 2},
-                    {"id": "m3", "title": "Budget Variance Analysis", "description": "Compare actual vs budgeted performance", "items": [{"title": "Lesson 1", "type": "video", "url": "https://www.youtube.com/embed/dQw4w9WgXcQ", "duration_minutes": 90}], "order": 3}
+                    {
+                        "id": "m1",
+                        "title": "Financial Modeling Fundamentals",
+                        "description": "Build your first P&L model",
+                        "items": [
+                            {
+                                "title": "Lesson 1",
+                                "type": "video",
+                                "url": "https://www.youtube.com/embed/dQw4w9WgXcQ",
+                                "duration_minutes": 90,
+                            }
+                        ],
+                        "order": 1,
+                    },
+                    {
+                        "id": "m2",
+                        "title": "Cash Flow Forecasting",
+                        "description": "Learn to predict and manage cash flows",
+                        "items": [
+                            {
+                                "title": "Lesson 1",
+                                "type": "video",
+                                "url": "https://www.youtube.com/embed/dQw4w9WgXcQ",
+                                "duration_minutes": 120,
+                            }
+                        ],
+                        "order": 2,
+                    },
+                    {
+                        "id": "m3",
+                        "title": "Budget Variance Analysis",
+                        "description": "Compare actual vs budgeted performance",
+                        "items": [
+                            {
+                                "title": "Lesson 1",
+                                "type": "video",
+                                "url": "https://www.youtube.com/embed/dQw4w9WgXcQ",
+                                "duration_minutes": 90,
+                            }
+                        ],
+                        "order": 3,
+                    },
                 ],
                 "tests": [
-                    {"id": "q1", "question": "What is the primary purpose of a P&L statement?", "options": ["Track daily transactions", "Show profitability over a period", "Calculate tax liability", "Record inventory levels"], "correct_answer": 1, "explanation": "A P&L statement shows revenues and expenses over a specific period."},
-                    {"id": "q2", "question": "In variance analysis, a favorable variance occurs when:", "options": ["Actual costs exceed budget", "Actual revenue is less than budget", "Actual results are better than budget", "Budget equals actual"], "correct_answer": 2, "explanation": "A favorable variance means actual results exceeded expectations."}
+                    {
+                        "id": "q1",
+                        "question": "What is the primary purpose of a P&L statement?",
+                        "options": [
+                            "Track daily transactions",
+                            "Show profitability over a period",
+                            "Calculate tax liability",
+                            "Record inventory levels",
+                        ],
+                        "correct_answer": 1,
+                        "explanation": "A P&L statement shows revenues and expenses over a specific period.",
+                    },
+                    {
+                        "id": "q2",
+                        "question": "In variance analysis, a favorable variance occurs when:",
+                        "options": [
+                            "Actual costs exceed budget",
+                            "Actual revenue is less than budget",
+                            "Actual results are better than budget",
+                            "Budget equals actual",
+                        ],
+                        "correct_answer": 2,
+                        "explanation": "A favorable variance means actual results exceeded expectations.",
+                    },
                 ],
-                "learning_outcomes": ["Build financial models", "Create dashboards", "Analyze variances"],
+                "learning_outcomes": [
+                    "Build financial models",
+                    "Create dashboards",
+                    "Analyze variances",
+                ],
                 "is_published": True,
                 "enrolled_count": 0,
                 "created_by": admin_id,
                 "created_at": now,
-                "updated_at": now
+                "updated_at": now,
             },
             {
                 "id": str(uuid.uuid4()),
@@ -2351,8 +2811,34 @@ async def seed_data():
                 "duration_hours": 20,
                 "price": 0,
                 "modules": [
-                    {"id": "m1", "title": "Introduction to HR Analytics", "description": "Overview of HR metrics", "items": [{"title": "Lesson 1", "type": "video", "url": "", "duration_minutes": 60}], "order": 1},
-                    {"id": "m2", "title": "Employee Attrition Analysis", "description": "Predict and prevent turnover", "items": [{"title": "Lesson 1", "type": "video", "url": "", "duration_minutes": 90}], "order": 2}
+                    {
+                        "id": "m1",
+                        "title": "Introduction to HR Analytics",
+                        "description": "Overview of HR metrics",
+                        "items": [
+                            {
+                                "title": "Lesson 1",
+                                "type": "video",
+                                "url": "",
+                                "duration_minutes": 60,
+                            }
+                        ],
+                        "order": 1,
+                    },
+                    {
+                        "id": "m2",
+                        "title": "Employee Attrition Analysis",
+                        "description": "Predict and prevent turnover",
+                        "items": [
+                            {
+                                "title": "Lesson 1",
+                                "type": "video",
+                                "url": "",
+                                "duration_minutes": 90,
+                            }
+                        ],
+                        "order": 2,
+                    },
                 ],
                 "tests": [],
                 "learning_outcomes": ["Analyze HR data", "Build HR dashboards"],
@@ -2360,7 +2846,7 @@ async def seed_data():
                 "enrolled_count": 0,
                 "created_by": admin_id,
                 "created_at": now,
-                "updated_at": now
+                "updated_at": now,
             },
             {
                 "id": str(uuid.uuid4()),
@@ -2375,9 +2861,48 @@ async def seed_data():
                 "duration_hours": 35,
                 "price": 0,
                 "modules": [
-                    {"id": "m1", "title": "Getting Started with Power BI", "description": "Installation and basics", "items": [{"title": "Lesson 1", "type": "video", "url": "", "duration_minutes": 45}], "order": 1},
-                    {"id": "m2", "title": "Data Modeling", "description": "Build star schemas", "items": [{"title": "Lesson 1", "type": "video", "url": "", "duration_minutes": 120}], "order": 2},
-                    {"id": "m3", "title": "DAX Fundamentals", "description": "Essential DAX functions", "items": [{"title": "Lesson 1", "type": "video", "url": "", "duration_minutes": 150}], "order": 3}
+                    {
+                        "id": "m1",
+                        "title": "Getting Started with Power BI",
+                        "description": "Installation and basics",
+                        "items": [
+                            {
+                                "title": "Lesson 1",
+                                "type": "video",
+                                "url": "",
+                                "duration_minutes": 45,
+                            }
+                        ],
+                        "order": 1,
+                    },
+                    {
+                        "id": "m2",
+                        "title": "Data Modeling",
+                        "description": "Build star schemas",
+                        "items": [
+                            {
+                                "title": "Lesson 1",
+                                "type": "video",
+                                "url": "",
+                                "duration_minutes": 120,
+                            }
+                        ],
+                        "order": 2,
+                    },
+                    {
+                        "id": "m3",
+                        "title": "DAX Fundamentals",
+                        "description": "Essential DAX functions",
+                        "items": [
+                            {
+                                "title": "Lesson 1",
+                                "type": "video",
+                                "url": "",
+                                "duration_minutes": 150,
+                            }
+                        ],
+                        "order": 3,
+                    },
                 ],
                 "tests": [],
                 "learning_outcomes": ["Master Power BI", "Write DAX formulas"],
@@ -2385,12 +2910,12 @@ async def seed_data():
                 "enrolled_count": 0,
                 "created_by": admin_id,
                 "created_at": now,
-                "updated_at": now
-            }
+                "updated_at": now,
+            },
         ]
         await db.courses.insert_many(courses)
         logger.info(f"Seeded {len(courses)} courses")
-    
+
     # Seed Interactive Labs (created by admin)
     lab_count = await db.labs.count_documents({})
     if lab_count == 0:
@@ -2408,10 +2933,46 @@ async def seed_data():
                 "difficulty": "intermediate",
                 "estimated_time_minutes": 120,
                 "steps": [
-                    {"id": "s1", "title": "Environment Setup", "description": "Set up your Python environment", "instructions": "Install the required packages using pip.", "code_template": "pip install pandas sqlite3 matplotlib", "expected_output": "Successfully installed packages", "hints": ["Use pip install", "Check Python version"], "order": 1},
-                    {"id": "s2", "title": "Load CSV Data", "description": "Read CSV file into a DataFrame", "instructions": "Use pandas to read the sales data CSV file.", "code_template": "import pandas as pd\n\n# Load the CSV file\ndf = pd.read_csv('sales_data.csv')\nprint(df.head())", "expected_output": "DataFrame with sales data", "hints": ["Use pd.read_csv()", "Check file path"], "order": 2},
-                    {"id": "s3", "title": "Data Cleaning", "description": "Clean and transform the data", "instructions": "Handle missing values and convert data types.", "code_template": "# Remove missing values\ndf = df.dropna()\n\n# Convert date column\ndf['date'] = pd.to_datetime(df['date'])\nprint(df.info())", "expected_output": "Clean DataFrame with correct types", "hints": ["Use dropna()", "Use pd.to_datetime()"], "order": 3},
-                    {"id": "s4", "title": "Create SQLite Database", "description": "Store data in SQLite", "instructions": "Create a database and insert the cleaned data.", "code_template": "import sqlite3\n\nconn = sqlite3.connect('sales.db')\ndf.to_sql('sales', conn, if_exists='replace')\nprint('Data saved to database')", "expected_output": "Data saved to sales.db", "hints": ["Use sqlite3.connect()", "Use to_sql()"], "order": 4}
+                    {
+                        "id": "s1",
+                        "title": "Environment Setup",
+                        "description": "Set up your Python environment",
+                        "instructions": "Install the required packages using pip.",
+                        "code_template": "pip install pandas sqlite3 matplotlib",
+                        "expected_output": "Successfully installed packages",
+                        "hints": ["Use pip install", "Check Python version"],
+                        "order": 1,
+                    },
+                    {
+                        "id": "s2",
+                        "title": "Load CSV Data",
+                        "description": "Read CSV file into a DataFrame",
+                        "instructions": "Use pandas to read the sales data CSV file.",
+                        "code_template": "import pandas as pd\n\n# Load the CSV file\ndf = pd.read_csv('sales_data.csv')\nprint(df.head())",
+                        "expected_output": "DataFrame with sales data",
+                        "hints": ["Use pd.read_csv()", "Check file path"],
+                        "order": 2,
+                    },
+                    {
+                        "id": "s3",
+                        "title": "Data Cleaning",
+                        "description": "Clean and transform the data",
+                        "instructions": "Handle missing values and convert data types.",
+                        "code_template": "# Remove missing values\ndf = df.dropna()\n\n# Convert date column\ndf['date'] = pd.to_datetime(df['date'])\nprint(df.info())",
+                        "expected_output": "Clean DataFrame with correct types",
+                        "hints": ["Use dropna()", "Use pd.to_datetime()"],
+                        "order": 3,
+                    },
+                    {
+                        "id": "s4",
+                        "title": "Create SQLite Database",
+                        "description": "Store data in SQLite",
+                        "instructions": "Create a database and insert the cleaned data.",
+                        "code_template": "import sqlite3\n\nconn = sqlite3.connect('sales.db')\ndf.to_sql('sales', conn, if_exists='replace')\nprint('Data saved to database')",
+                        "expected_output": "Data saved to sales.db",
+                        "hints": ["Use sqlite3.connect()", "Use to_sql()"],
+                        "order": 4,
+                    },
                 ],
                 "prerequisites": ["Basic Python", "Understanding of DataFrames"],
                 "skills_gained": ["Pandas", "SQLite", "Data pipelines"],
@@ -2420,7 +2981,7 @@ async def seed_data():
                 "validation_type": "output_match",
                 "completions_count": 0,
                 "created_by": admin_id,
-                "created_at": now
+                "created_at": now,
             },
             {
                 "id": str(uuid.uuid4()),
@@ -2434,8 +2995,26 @@ async def seed_data():
                 "difficulty": "intermediate",
                 "estimated_time_minutes": 150,
                 "steps": [
-                    {"id": "s1", "title": "Enable Developer Tab", "description": "Set up Excel for VBA development", "instructions": "Go to File > Options > Customize Ribbon > Enable Developer tab", "code_template": "", "expected_output": "Developer tab visible", "hints": ["Check Excel Options"], "order": 1},
-                    {"id": "s2", "title": "Create First Macro", "description": "Write your first VBA macro", "instructions": "Open VBA editor and create a simple macro.", "code_template": "Sub FormatReport()\n    ' Format the header row\n    Range(\"A1:E1\").Font.Bold = True\n    Range(\"A1:E1\").Interior.Color = RGB(0, 112, 192)\nEnd Sub", "expected_output": "Formatted header row", "hints": ["Use Alt+F11 to open VBA editor"], "order": 2}
+                    {
+                        "id": "s1",
+                        "title": "Enable Developer Tab",
+                        "description": "Set up Excel for VBA development",
+                        "instructions": "Go to File > Options > Customize Ribbon > Enable Developer tab",
+                        "code_template": "",
+                        "expected_output": "Developer tab visible",
+                        "hints": ["Check Excel Options"],
+                        "order": 1,
+                    },
+                    {
+                        "id": "s2",
+                        "title": "Create First Macro",
+                        "description": "Write your first VBA macro",
+                        "instructions": "Open VBA editor and create a simple macro.",
+                        "code_template": 'Sub FormatReport()\n    \' Format the header row\n    Range("A1:E1").Font.Bold = True\n    Range("A1:E1").Interior.Color = RGB(0, 112, 192)\nEnd Sub',
+                        "expected_output": "Formatted header row",
+                        "hints": ["Use Alt+F11 to open VBA editor"],
+                        "order": 2,
+                    },
                 ],
                 "prerequisites": ["Excel intermediate"],
                 "skills_gained": ["VBA programming", "Excel automation"],
@@ -2444,7 +3023,7 @@ async def seed_data():
                 "validation_type": "manual",
                 "completions_count": 0,
                 "created_by": admin_id,
-                "created_at": now
+                "created_at": now,
             },
             {
                 "id": str(uuid.uuid4()),
@@ -2458,9 +3037,36 @@ async def seed_data():
                 "difficulty": "beginner",
                 "estimated_time_minutes": 90,
                 "steps": [
-                    {"id": "s1", "title": "Basic SELECT Queries", "description": "Retrieve data from tables", "instructions": "Write SELECT statements to fetch data.", "code_template": "SELECT * FROM employees\nWHERE department = 'Sales'\nORDER BY hire_date DESC;", "expected_output": "List of sales employees", "hints": ["Use WHERE for filtering"], "order": 1},
-                    {"id": "s2", "title": "JOIN Operations", "description": "Combine data from multiple tables", "instructions": "Use JOIN to link employees with departments.", "code_template": "SELECT e.name, d.department_name, e.salary\nFROM employees e\nJOIN departments d ON e.dept_id = d.id;", "expected_output": "Employee list with department names", "hints": ["Use table aliases"], "order": 2},
-                    {"id": "s3", "title": "Aggregations", "description": "Summarize data with GROUP BY", "instructions": "Calculate totals and averages per department.", "code_template": "SELECT department, \n       COUNT(*) as employee_count,\n       AVG(salary) as avg_salary\nFROM employees\nGROUP BY department;", "expected_output": "Department summary statistics", "hints": ["Use aggregate functions"], "order": 3}
+                    {
+                        "id": "s1",
+                        "title": "Basic SELECT Queries",
+                        "description": "Retrieve data from tables",
+                        "instructions": "Write SELECT statements to fetch data.",
+                        "code_template": "SELECT * FROM employees\nWHERE department = 'Sales'\nORDER BY hire_date DESC;",
+                        "expected_output": "List of sales employees",
+                        "hints": ["Use WHERE for filtering"],
+                        "order": 1,
+                    },
+                    {
+                        "id": "s2",
+                        "title": "JOIN Operations",
+                        "description": "Combine data from multiple tables",
+                        "instructions": "Use JOIN to link employees with departments.",
+                        "code_template": "SELECT e.name, d.department_name, e.salary\nFROM employees e\nJOIN departments d ON e.dept_id = d.id;",
+                        "expected_output": "Employee list with department names",
+                        "hints": ["Use table aliases"],
+                        "order": 2,
+                    },
+                    {
+                        "id": "s3",
+                        "title": "Aggregations",
+                        "description": "Summarize data with GROUP BY",
+                        "instructions": "Calculate totals and averages per department.",
+                        "code_template": "SELECT department, \n       COUNT(*) as employee_count,\n       AVG(salary) as avg_salary\nFROM employees\nGROUP BY department;",
+                        "expected_output": "Department summary statistics",
+                        "hints": ["Use aggregate functions"],
+                        "order": 3,
+                    },
                 ],
                 "prerequisites": ["None - beginner friendly"],
                 "skills_gained": ["SQL queries", "Data analysis"],
@@ -2469,8 +3075,8 @@ async def seed_data():
                 "validation_type": "code_match",
                 "completions_count": 0,
                 "created_by": admin_id,
-                "created_at": now
-            }
+                "created_at": now,
+            },
         ]
         await db.labs.insert_many(labs)
         logger.info(f"Seeded {len(labs)} labs")
@@ -2500,14 +3106,18 @@ async def seed_data():
         await db.labs.create_index("id", unique=True)
 
         # Course progress (compound index for fast lookups)
-        await db.course_progress.create_index([("user_id", 1), ("course_id", 1)], unique=True)
+        await db.course_progress.create_index(
+            [("user_id", 1), ("course_id", 1)], unique=True
+        )
 
         # Certificates
         await db.certificates.create_index("certificate_number", unique=True)
         await db.certificates.create_index("user_id")
 
         # Workshop registrations
-        await db.workshop_registrations.create_index([("user_id", 1), ("workshop_id", 1)], unique=True)
+        await db.workshop_registrations.create_index(
+            [("user_id", 1), ("workshop_id", 1)], unique=True
+        )
 
         # Access logs
         await db.access_logs.create_index("timestamp")

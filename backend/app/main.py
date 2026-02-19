@@ -1,15 +1,17 @@
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.middleware.cors import CORSMiddleware
+
+from app.api.api import api_router
 from app.core.config import settings
 from app.core.logging_config import setup_logging
-from app.api.api import api_router
 from app.db.session import db
-from pathlib import Path
-from contextlib import asynccontextmanager
 
 # Set up structured logging
 logger = setup_logging()
@@ -21,6 +23,7 @@ limiter = Limiter(key_func=get_remote_address)
 if settings.SENTRY_DSN:
     try:
         import sentry_sdk
+
         sentry_sdk.init(
             dsn=settings.SENTRY_DSN,
             environment=settings.ENVIRONMENT,
@@ -37,6 +40,7 @@ async def lifespan(app: FastAPI):
     # Startup
     db.connect()
     from app.db.init_db import init_db
+
     await init_db()
     logger.info("Application startup: DB connected and initialized")
     yield
@@ -49,7 +53,7 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Set limiter
@@ -78,6 +82,7 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 # Include Router
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
 
 @app.get("/health")
 async def health_check():
