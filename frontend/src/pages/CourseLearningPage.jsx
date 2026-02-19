@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { 
+import {
   getCourseBySlug, getCourseProgress, markModuleComplete, submitQuiz,
   getCourseAssignments, submitAssignment, getMyCertificates
 } from '@/services/api';
@@ -22,7 +22,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { 
+import {
   ArrowLeft, Play, CheckCircle, Circle, Clock, Award, FileText,
   Upload, Loader2, AlertCircle, Trophy, Download, ExternalLink
 } from 'lucide-react';
@@ -32,28 +32,29 @@ const CourseLearningPage = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
   const { isAuthenticated, loading: authLoading } = useAuth();
-  
+
   const [course, setCourse] = useState(null);
   const [progress, setProgress] = useState(null);
   const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('modules');
   const [selectedModule, setSelectedModule] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null);
   const [completingModule, setCompletingModule] = useState(false);
-  
+
   // Quiz state
   const [quizAnswers, setQuizAnswers] = useState({});
   const [submittingQuiz, setSubmittingQuiz] = useState(false);
   const [quizResult, setQuizResult] = useState(null);
   const [showQuizResultDialog, setShowQuizResultDialog] = useState(false);
-  
+
   // Assignment state
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [assignmentFile, setAssignmentFile] = useState(null);
   const [assignmentNotes, setAssignmentNotes] = useState('');
   const [submittingAssignment, setSubmittingAssignment] = useState(false);
   const [showAssignmentDialog, setShowAssignmentDialog] = useState(false);
-  
+
   // Certificate state
   const [certificate, setCertificate] = useState(null);
   const [showCertificateDialog, setShowCertificateDialog] = useState(false);
@@ -63,25 +64,29 @@ const CourseLearningPage = () => {
       // First get the course to get its ID
       const courseData = await getCourseBySlug(slug);
       setCourse(courseData);
-      
+
       // Then fetch progress and assignments using course ID
       const [progressData, assignmentsData] = await Promise.all([
         getCourseProgress(courseData.id).catch(() => null),
         getCourseAssignments(courseData.id).catch(() => [])
       ]);
-      
+
       if (progressData) {
         setProgress(progressData);
         if (progressData.certificate) {
           setCertificate(progressData.certificate);
         }
       }
-      
+
       setAssignments(assignmentsData);
-      
-      // Select first module by default
+
+      // Select first module and first item by default
       if (courseData.modules?.length > 0) {
-        setSelectedModule(courseData.modules[0]);
+        const firstModule = courseData.modules[0];
+        setSelectedModule(firstModule);
+        if (firstModule.items?.length > 0) {
+          setSelectedItem(firstModule.items[0]);
+        }
       }
     } catch (error) {
       console.error('Failed to fetch data:', error);
@@ -111,24 +116,28 @@ const CourseLearningPage = () => {
 
   const handleMarkComplete = async () => {
     if (!selectedModule) return;
-    
+
     setCompletingModule(true);
     try {
       const result = await markModuleComplete(course.id, selectedModule.id, 30);
       toast.success('Module marked as complete!');
-      
+
       if (result.certificate_issued && result.certificate) {
         setCertificate(result.certificate);
         setShowCertificateDialog(true);
       }
-      
+
       // Refresh progress
       await fetchData();
-      
+
       // Auto-select next module
       const currentIndex = course.modules.findIndex(m => m.id === selectedModule.id);
       if (currentIndex < course.modules.length - 1) {
-        setSelectedModule(course.modules[currentIndex + 1]);
+        const nextModule = course.modules[currentIndex + 1];
+        setSelectedModule(nextModule);
+        if (nextModule.items?.length > 0) {
+          setSelectedItem(nextModule.items[0]);
+        }
       }
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to mark complete');
@@ -137,25 +146,26 @@ const CourseLearningPage = () => {
     }
   };
 
+  // ... (Keep handleQuizSubmit and handleAssignmentSubmit as is) ...
   const handleQuizSubmit = async () => {
     const totalQuestions = course.tests?.length || 0;
     const answeredQuestions = Object.keys(quizAnswers).length;
-    
+
     if (answeredQuestions < totalQuestions) {
       toast.error(`Please answer all questions (${answeredQuestions}/${totalQuestions} answered)`);
       return;
     }
-    
+
     setSubmittingQuiz(true);
     try {
       const result = await submitQuiz(course.id, quizAnswers);
       setQuizResult(result);
       setShowQuizResultDialog(true);
-      
+
       if (result.certificate_issued && result.certificate) {
         setCertificate(result.certificate);
       }
-      
+
       await fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to submit quiz');
@@ -169,7 +179,7 @@ const CourseLearningPage = () => {
       toast.error('Please select a file to upload');
       return;
     }
-    
+
     setSubmittingAssignment(true);
     try {
       await submitAssignment(selectedAssignment.id, assignmentFile, assignmentNotes);
@@ -213,14 +223,14 @@ const CourseLearningPage = () => {
       {/* Header */}
       <div className="bg-slate-900 text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <Link 
-            to="/my-courses" 
+          <Link
+            to="/my-courses"
             className="inline-flex items-center gap-2 text-slate-300 hover:text-white mb-4 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
             Back to My Courses
           </Link>
-          
+
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <h1 className="font-heading font-bold text-2xl" data-testid="learning-course-title">
@@ -236,7 +246,7 @@ const CourseLearningPage = () => {
                 </Badge>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-4">
               <div className="text-right">
                 <p className="text-sm text-slate-400">Progress</p>
@@ -245,10 +255,10 @@ const CourseLearningPage = () => {
               <div className="w-32">
                 <Progress value={overallProgress} className="h-3" />
               </div>
-              
+
               {certificate && (
-                <Button 
-                  variant="secondary" 
+                <Button
+                  variant="secondary"
                   size="sm"
                   onClick={() => setShowCertificateDialog(true)}
                   className="gap-2"
@@ -285,70 +295,74 @@ const CourseLearningPage = () => {
           <TabsContent value="modules">
             <div className="grid lg:grid-cols-3 gap-8">
               {/* Module List */}
-              <div className="space-y-2">
-                <h3 className="font-semibold mb-4">Course Content</h3>
+              <div className="space-y-4">
+                <h3 className="font-semibold mb-2">Course Content</h3>
                 {course.modules?.map((module, index) => {
                   const completed = isModuleCompleted(module.id);
-                  const isActive = selectedModule?.id === module.id;
-                  
+                  const isModuleActive = selectedModule?.id === module.id;
+
                   return (
-                    <button
-                      key={module.id}
-                      onClick={() => setSelectedModule(module)}
-                      className={`w-full text-left p-4 rounded-lg border transition-all ${
-                        isActive 
-                          ? 'border-primary bg-primary/5' 
-                          : 'border-slate-200 hover:border-slate-300'
-                      }`}
-                      data-testid={`module-item-${index}`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="mt-1">
-                          {completed ? (
-                            <CheckCircle className="w-5 h-5 text-green-500" />
-                          ) : (
-                            <Circle className="w-5 h-5 text-slate-300" />
-                          )}
+                    <div key={module.id} className="border rounded-lg overflow-hidden bg-white">
+                      <div
+                        className={`p-4 cursor-pointer flex items-center justify-between ${isModuleActive ? 'bg-slate-50 border-b' : 'hover:bg-slate-50'}`}
+                        onClick={() => setSelectedModule(module)}
+                      >
+                        <div className="flex items-center gap-3">
+                          {completed ? <CheckCircle className="w-5 h-5 text-green-500" /> : <Circle className="w-5 h-5 text-slate-300" />}
+                          <span className={`font-medium ${completed ? 'text-green-700' : ''}`}>{index + 1}. {module.title}</span>
                         </div>
-                        <div className="flex-1">
-                          <p className={`font-medium ${completed ? 'text-green-700' : ''}`}>
-                            {index + 1}. {module.title}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            {module.duration_minutes} min
-                          </p>
-                        </div>
+                        {isModuleActive && <span className="text-xs text-muted-foreground">{module.items?.length || 0} items</span>}
                       </div>
-                    </button>
+                      {isModuleActive && (
+                        <div className="bg-slate-50/50">
+                          {module.items?.map((item, i) => (
+                            <div
+                              key={i}
+                              className={`px-4 py-3 pl-12 flex items-center gap-3 cursor-pointer hover:bg-slate-100 transition-colors ${selectedItem?.id === item.id ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-600'}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedItem(item);
+                              }}
+                            >
+                              {item.type === 'video' ? <Play className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+                              <span className="text-sm line-clamp-1">{item.title}</span>
+                              <span className="text-xs text-muted-foreground ml-auto">{item.duration_minutes}m</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
 
               {/* Module Content */}
               <div className="lg:col-span-2">
-                {selectedModule ? (
+                {selectedModule && selectedItem ? (
                   <Card>
                     <CardHeader>
-                      <CardTitle>{selectedModule.title}</CardTitle>
-                      <CardDescription>{selectedModule.description}</CardDescription>
+                      <CardTitle className="flex items-center gap-2">
+                        <span className="text-muted-foreground font-normal text-base">{selectedModule.title} /</span>
+                        {selectedItem.title}
+                      </CardTitle>
+                      {/* <CardDescription>{selectedModule.description}</CardDescription> */}
                     </CardHeader>
                     <CardContent className="space-y-6">
-                      {/* Video Player */}
-                      {selectedModule.video_url ? (
+                      {/* Content Player */}
+                      {selectedItem.type === 'video' && selectedItem.url ? (
                         <div className="aspect-video bg-slate-900 rounded-lg overflow-hidden">
-                          <video
-                            src={selectedModule.video_url}
-                            controls
+                          <iframe
+                            src={selectedItem.url} // Using iframe for embed URL, or video tag if direct file
+                            title={selectedItem.title}
                             className="w-full h-full"
-                            data-testid="module-video"
+                            allowFullScreen
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                           />
                         </div>
                       ) : (
-                        <div className="aspect-video bg-slate-100 rounded-lg flex items-center justify-center">
-                          <div className="text-center text-muted-foreground">
-                            <Play className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                            <p>Video content coming soon</p>
-                          </div>
+                        <div className="p-8 bg-slate-50 rounded-lg">
+                          <h4 className="font-semibold mb-2">{selectedItem.title}</h4>
+                          <p className="text-muted-foreground">{selectedItem.content || "Content coming soon."}</p>
                         </div>
                       )}
 
@@ -362,13 +376,13 @@ const CourseLearningPage = () => {
                             </>
                           ) : (
                             <span className="text-muted-foreground">
-                              Mark this module as complete when you're done
+                              Mark this module as complete when you're done with all items
                             </span>
                           )}
                         </div>
-                        
+
                         {!isModuleCompleted(selectedModule.id) && (
-                          <Button 
+                          <Button
                             onClick={handleMarkComplete}
                             disabled={completingModule}
                             data-testid="mark-complete-btn"
@@ -381,7 +395,7 @@ const CourseLearningPage = () => {
                             ) : (
                               <>
                                 <CheckCircle className="w-4 h-4 mr-2" />
-                                Mark as Complete
+                                Mark Module Complete
                               </>
                             )}
                           </Button>
@@ -392,7 +406,7 @@ const CourseLearningPage = () => {
                 ) : (
                   <Card>
                     <CardContent className="py-12 text-center">
-                      <p className="text-muted-foreground">Select a module to begin</p>
+                      <p className="text-muted-foreground">Select a lesson to begin</p>
                     </CardContent>
                   </Card>
                 )}
@@ -409,8 +423,8 @@ const CourseLearningPage = () => {
                     <div>
                       <CardTitle>Course Quiz</CardTitle>
                       <CardDescription>
-                        Pass with 80% or higher to earn your certificate. 
-                        {attemptsRemaining > 0 
+                        Pass with 80% or higher to earn your certificate.
+                        {attemptsRemaining > 0
                           ? ` You have ${attemptsRemaining} attempt(s) remaining.`
                           : ' No attempts remaining.'}
                       </CardDescription>
@@ -447,14 +461,14 @@ const CourseLearningPage = () => {
                           </h4>
                           <RadioGroup
                             value={quizAnswers[test.id]?.toString()}
-                            onValueChange={(value) => 
+                            onValueChange={(value) =>
                               setQuizAnswers(prev => ({ ...prev, [test.id]: parseInt(value) }))
                             }
                           >
                             {test.options.map((option, optIndex) => (
                               <div key={optIndex} className="flex items-center space-x-3">
-                                <RadioGroupItem 
-                                  value={optIndex.toString()} 
+                                <RadioGroupItem
+                                  value={optIndex.toString()}
                                   id={`q${index}-opt${optIndex}`}
                                   data-testid={`quiz-option-${index}-${optIndex}`}
                                 />
@@ -466,12 +480,12 @@ const CourseLearningPage = () => {
                           </RadioGroup>
                         </div>
                       ))}
-                      
+
                       <div className="flex items-center justify-between pt-6 border-t">
                         <p className="text-sm text-muted-foreground">
                           {Object.keys(quizAnswers).length} of {course.tests.length} questions answered
                         </p>
-                        <Button 
+                        <Button
                           onClick={handleQuizSubmit}
                           disabled={submittingQuiz}
                           data-testid="submit-quiz-btn"
@@ -492,7 +506,7 @@ const CourseLearningPage = () => {
                       <AlertCircle className="w-16 h-16 mx-auto text-red-500 mb-4" />
                       <h3 className="text-xl font-semibold mb-2">No Attempts Remaining</h3>
                       <p className="text-muted-foreground">
-                        Your best score was {quizBestScore.toFixed(0)}%. 
+                        Your best score was {quizBestScore.toFixed(0)}%.
                         Contact support if you need additional attempts.
                       </p>
                     </div>
@@ -509,7 +523,7 @@ const CourseLearningPage = () => {
                 {assignments.map((assignment) => {
                   const hasSubmission = assignment.submission;
                   const isGraded = assignment.submission?.grade !== null;
-                  
+
                   return (
                     <Card key={assignment.id}>
                       <CardContent className="p-6">
@@ -528,7 +542,7 @@ const CourseLearningPage = () => {
                               )}
                             </div>
                             <p className="text-muted-foreground mb-4">{assignment.description}</p>
-                            
+
                             {hasSubmission && assignment.submission.feedback && (
                               <div className="bg-slate-50 p-4 rounded-lg mb-4">
                                 <p className="text-sm font-medium mb-1">Instructor Feedback:</p>
@@ -536,7 +550,7 @@ const CourseLearningPage = () => {
                               </div>
                             )}
                           </div>
-                          
+
                           <div>
                             {!hasSubmission ? (
                               <Button
@@ -590,7 +604,7 @@ const CourseLearningPage = () => {
               </p>
             ) : (
               <p className="text-muted-foreground">
-                You need 80% to pass. {quizResult?.attempts_remaining > 0 
+                You need 80% to pass. {quizResult?.attempts_remaining > 0
                   ? `You have ${quizResult.attempts_remaining} attempt(s) remaining.`
                   : 'No attempts remaining.'}
               </p>
@@ -701,9 +715,9 @@ const CourseLearningPage = () => {
               Close
             </Button>
             <Button asChild>
-              <a 
-                href={`/certificates/verify/${certificate?.certificate_number}`} 
-                target="_blank" 
+              <a
+                href={`/certificates/verify/${certificate?.certificate_number}`}
+                target="_blank"
                 rel="noopener noreferrer"
               >
                 <ExternalLink className="w-4 h-4 mr-2" />

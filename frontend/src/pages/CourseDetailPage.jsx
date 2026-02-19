@@ -6,11 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { 
-  Clock, Users, BookOpen, Award, ArrowLeft, 
-  CheckCircle, Play, Loader2, GraduationCap 
+import {
+  Clock, Users, BookOpen, Award, ArrowLeft,
+  CheckCircle, Play, Loader2, GraduationCap
 } from 'lucide-react';
 import { toast } from 'sonner';
+import SEOHead from '@/components/SEOHead';
 
 const CourseDetailPage = () => {
   const { slug } = useParams();
@@ -39,7 +40,7 @@ const CourseDetailPage = () => {
 
   const handleEnroll = async () => {
     if (!isAuthenticated) {
-      navigate('/login');
+      navigate(`/login?redirect=${encodeURIComponent(location.pathname)}`);
       return;
     }
 
@@ -47,8 +48,8 @@ const CourseDetailPage = () => {
     try {
       await enrollInCourse(course.id);
       setCourse({ ...course, is_enrolled: true });
-      updateUser({ 
-        enrolled_courses: [...(user.enrolled_courses || []), course.id] 
+      updateUser({
+        enrolled_courses: [...(user.enrolled_courses || []), course.id]
       });
       toast.success('Successfully enrolled in the course!');
     } catch (error) {
@@ -90,18 +91,23 @@ const CourseDetailPage = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEOHead
+        title={course.title}
+        description={course.short_description}
+        url={`/courses/${slug}`}
+      />
       {/* Header */}
       <div className="bg-slate-900 text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <Link 
-            to="/courses" 
+          <Link
+            to="/courses"
             className="inline-flex items-center gap-2 text-slate-300 hover:text-white mb-6 transition-colors"
             data-testid="back-to-courses"
           >
             <ArrowLeft className="w-4 h-4" />
             Back to Courses
           </Link>
-          
+
           <div className="grid lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-6">
               <div className="flex flex-wrap items-center gap-3">
@@ -112,15 +118,15 @@ const CourseDetailPage = () => {
                   {course.category}
                 </Badge>
               </div>
-              
+
               <h1 className="font-heading font-bold text-3xl sm:text-4xl" data-testid="course-title">
                 {course.title}
               </h1>
-              
+
               <p className="text-slate-300 text-lg leading-relaxed">
                 {course.short_description}
               </p>
-              
+
               <div className="flex flex-wrap items-center gap-6 text-sm text-slate-300">
                 <span className="flex items-center gap-2">
                   <Clock className="w-5 h-5" />
@@ -136,7 +142,7 @@ const CourseDetailPage = () => {
                 </span>
               </div>
             </div>
-            
+
             {/* Enrollment Card */}
             <div className="lg:row-start-1">
               <Card className="sticky top-24 overflow-hidden">
@@ -153,9 +159,9 @@ const CourseDetailPage = () => {
                       <p className="text-3xl font-bold text-green-600">Free</p>
                     )}
                   </div>
-                  
+
                   {course.is_enrolled ? (
-                    <Button 
+                    <Button
                       className="w-full h-12 rounded-full bg-secondary text-secondary-foreground hover:bg-secondary/90"
                       onClick={() => navigate('/my-courses')}
                       data-testid="go-to-my-courses"
@@ -164,7 +170,7 @@ const CourseDetailPage = () => {
                       Go to My Courses
                     </Button>
                   ) : (
-                    <Button 
+                    <Button
                       className="w-full h-12 rounded-full bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20"
                       onClick={handleEnroll}
                       disabled={enrolling}
@@ -183,7 +189,7 @@ const CourseDetailPage = () => {
                       )}
                     </Button>
                   )}
-                  
+
                   <div className="space-y-3 text-sm">
                     <div className="flex items-center gap-2">
                       <CheckCircle className="w-4 h-4 text-green-500" />
@@ -223,8 +229,8 @@ const CourseDetailPage = () => {
                 <h2 className="font-heading font-semibold text-2xl mb-6">Course Syllabus</h2>
                 <Accordion type="single" collapsible className="space-y-3">
                   {course.modules.map((module, index) => (
-                    <AccordionItem 
-                      key={index} 
+                    <AccordionItem
+                      key={index}
                       value={`module-${index}`}
                       className="bg-white border rounded-xl px-6"
                     >
@@ -241,8 +247,43 @@ const CourseDetailPage = () => {
                           </div>
                         </div>
                       </AccordionTrigger>
-                      <AccordionContent className="pb-4 pl-12">
-                        <p className="text-muted-foreground">{module.description}</p>
+
+                      <AccordionContent className="pb-4">
+                        <div className="space-y-2">
+                          <p className="px-6 text-sm text-muted-foreground mb-3">{module.description}</p>
+                          {module.items?.map((item, itemIndex) => (
+                            <div
+                              key={itemIndex}
+                              className="flex items-center gap-3 px-6 py-2 hover:bg-slate-50 transition-colors cursor-pointer"
+                              onClick={() => {
+                                if (item.type === 'video' && item.url) {
+                                  // Handle video play - for now just log or navigate if we had a player
+                                  console.log('Play video:', item.title);
+                                  // Could open a modal or navigate to a lesson page
+                                }
+                              }}
+                            >
+                              {item.type === 'video' ? (
+                                <Play className="w-4 h-4 text-primary" />
+                              ) : item.type === 'quiz' ? (
+                                <CheckCircle className="w-4 h-4 text-orange-500" />
+                              ) : (
+                                <BookOpen className="w-4 h-4 text-blue-500" />
+                              )}
+                              <div className="flex-1">
+                                <p className="text-sm font-medium text-slate-700">{item.title}</p>
+                                <p className="text-xs text-muted-foreground">{item.duration_minutes} min</p>
+                              </div>
+                              {course.is_enrolled ? (
+                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                                  <Play className="w-4 h-4" />
+                                </Button>
+                              ) : (
+                                item.is_free && <Badge variant="secondary" className="text-xs">Free Preview</Badge>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       </AccordionContent>
                     </AccordionItem>
                   ))}
@@ -255,7 +296,7 @@ const CourseDetailPage = () => {
           <div className="hidden lg:block" />
         </div>
       </div>
-    </div>
+    </div >
   );
 };
 

@@ -23,10 +23,17 @@ export const signup = async (email, password, firstName, lastName) => {
   return response.data;
 };
 
+export const refreshToken = async () => {
+  const response = await axios.post(`${API_URL}/auth/refresh`, {}, {
+    headers: getAuthHeader()
+  });
+  return response.data;
+};
+
 // Workshops
-export const getWorkshops = async (activeOnly = true) => {
+export const getWorkshops = async ({ activeOnly = true, search, page = 1, limit = 12 } = {}) => {
   const response = await axios.get(`${API_URL}/workshops`, {
-    params: { active_only: activeOnly },
+    params: { active_only: activeOnly, search, page, limit },
     headers: getAuthHeader()
   });
   return response.data;
@@ -39,10 +46,19 @@ export const getWorkshop = async (workshopId) => {
   return response.data;
 };
 
+export const registerForWorkshop = async (workshopId) => {
+  const response = await axios.post(
+    `${API_URL}/workshops/${workshopId}/register`,
+    {},
+    { headers: getAuthHeader() }
+  );
+  return response.data;
+};
+
 // Courses
-export const getCourses = async (publishedOnly = true) => {
+export const getCourses = async ({ publishedOnly = true, search, category, level, page = 1, limit = 12 } = {}) => {
   const response = await axios.get(`${API_URL}/courses`, {
-    params: { published_only: publishedOnly },
+    params: { published_only: publishedOnly, search, category, level, page, limit },
     headers: getAuthHeader()
   });
   return response.data;
@@ -103,9 +119,9 @@ export const deleteLearningPath = async (pathId) => {
 };
 
 // Labs
-export const getLabs = async (publishedOnly = true) => {
+export const getLabs = async ({ publishedOnly = true, search, difficulty, page = 1, limit = 12 } = {}) => {
   const response = await axios.get(`${API_URL}/labs`, {
-    params: { published_only: publishedOnly },
+    params: { published_only: publishedOnly, search, difficulty, page, limit },
     headers: getAuthHeader()
   });
   return response.data;
@@ -217,7 +233,7 @@ export const submitQuiz = async (courseId, answers) => {
 export const uploadImage = async (file, onProgress) => {
   const formData = new FormData();
   formData.append('file', file);
-  
+
   const response = await axios.post(`${API_URL}/upload/image`, formData, {
     headers: {
       ...getAuthHeader(),
@@ -236,7 +252,7 @@ export const uploadImage = async (file, onProgress) => {
 export const uploadVideo = async (file, onProgress) => {
   const formData = new FormData();
   formData.append('file', file);
-  
+
   const response = await axios.post(`${API_URL}/upload/video`, formData, {
     headers: {
       ...getAuthHeader(),
@@ -255,7 +271,7 @@ export const uploadVideo = async (file, onProgress) => {
 export const uploadDocument = async (file) => {
   const formData = new FormData();
   formData.append('file', file);
-  
+
   const response = await axios.post(`${API_URL}/upload/document`, formData, {
     headers: {
       ...getAuthHeader(),
@@ -292,7 +308,7 @@ export const submitAssignment = async (assignmentId, file, notes = '') => {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('notes', notes);
-  
+
   const response = await axios.post(`${API_URL}/assignments/${assignmentId}/submit`, formData, {
     headers: {
       ...getAuthHeader(),
@@ -524,3 +540,29 @@ export const adminDeleteLearningPath = async (pathId) => {
   });
   return response.data;
 };
+
+
+// Public paths that should NOT redirect to login on 401
+const PUBLIC_PATHS = ['/courses', '/workshops', '/labs', '/open-source', '/certificates/verify'];
+
+// Interceptor to handle 401s (Token Expired)
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response && error.response.status === 401) {
+      const requestUrl = error.config?.url || '';
+      const isPublicRequest = PUBLIC_PATHS.some(p => requestUrl.includes(p));
+
+      if (!isPublicRequest) {
+        // Only clear token and redirect for auth-required requests
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        if (!window.location.pathname.startsWith('/login')) {
+          const currentPath = window.location.pathname + window.location.search;
+          window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
+        }
+      }
+    }
+    return Promise.reject(error);
+  }
+);

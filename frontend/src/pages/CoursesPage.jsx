@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getCourses } from '@/services/api';
 import CourseCard from '@/components/CourseCard';
+import { CardGridSkeleton } from '@/components/LoadingSkeleton';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Search, SlidersHorizontal, X } from 'lucide-react';
+import SEOHead from '@/components/SEOHead';
 
 const CoursesPage = () => {
   const [courses, setCourses] = useState([]);
@@ -26,8 +28,9 @@ const CoursesPage = () => {
     const fetchCourses = async () => {
       try {
         const data = await getCourses();
-        setCourses(data);
-        setFilteredCourses(data);
+        const items = data.items || data;
+        setCourses(items);
+        setFilteredCourses(items);
       } catch (error) {
         console.error('Failed to fetch courses:', error);
       } finally {
@@ -77,6 +80,11 @@ const CoursesPage = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEOHead
+        title="Explore Courses"
+        description="Browse our collection of expert-led courses in AI, Data Science, and Web Development. Start learning today."
+        url="/courses"
+      />
       {/* Header */}
       <div className="bg-white border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -84,7 +92,7 @@ const CoursesPage = () => {
             Explore Courses
           </h1>
           <p className="text-muted-foreground text-lg max-w-2xl">
-            Discover courses designed to help you build practical, job-ready skills. 
+            Discover courses designed to help you build practical, job-ready skills.
             Learn at your own pace with hands-on projects.
           </p>
         </div>
@@ -187,11 +195,7 @@ const CoursesPage = () => {
 
         {/* Course Grid */}
         {loading ? (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-              <div key={i} className="h-80 bg-slate-100 rounded-xl animate-pulse" />
-            ))}
-          </div>
+          <CardGridSkeleton count={8} />
         ) : filteredCourses.length === 0 ? (
           <div className="text-center py-16">
             <SlidersHorizontal className="w-12 h-12 text-muted-foreground mx-auto mb-4" />

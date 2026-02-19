@@ -1,10 +1,14 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from openai import AsyncOpenAI
 import os
 import logging
 from pathlib import Path
@@ -19,6 +23,10 @@ import shutil
 import io
 
 ROOT_DIR = Path(__file__).parent
+SERVICE_DIR = ROOT_DIR / 'services'
+import sys
+sys.path.append(str(ROOT_DIR))
+from services.storage import StorageService
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
@@ -27,15 +35,34 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 # JWT Configuration
-JWT_SECRET = os.environ.get('JWT_SECRET', 'pluralskill-secret-key-change-in-production')
+# JWT Configuration
+JWT_SECRET = os.environ.get('JWT_SECRET', '')
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET environment variable is not set. Cannot start server securely.")
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRATION_HOURS = 24
+JWT_EXPIRATION_HOURS = 168 # 7 days
 
 # LLM Configuration
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
+OPENAI_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4o')
+
+# Initialize OpenAI client (lazy - only used when AI features are called)
+openai_client = None
+def get_openai_client():
+    global openai_client
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="OpenAI API key not configured")
+    if openai_client is None:
+        openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    return openai_client
+
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address)
 
 # Create the main app
-app = FastAPI(title="PluralSkill API", version="3.0.0")
+app = FastAPI(title="PluralSkill API", version="4.0.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -49,6 +76,9 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 (UPLOAD_DIR / "certificates").mkdir(exist_ok=True)
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+
+# Initialize Storage Service
+storage_service = StorageService(upload_dir=UPLOAD_DIR)
 
 security = HTTPBearer(auto_error=False)
 
@@ -145,12 +175,21 @@ class Workshop(BaseModel):
     created_at: str
 
 # Course Models with Videos and Tests
+class ModuleItem(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: str
+    type: str = "video" # video, article, quiz
+    url: Optional[str] = ""
+    content: Optional[str] = "" # For articles
+    duration_minutes: int = 10
+    is_free: bool = False
+
 class CourseModule(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     title: str
     description: str
-    duration_minutes: int = 30
-    video_url: Optional[str] = ""
+    description: str
+    items: List[ModuleItem] = []
     order: int = 0
 
 class CourseTest(BaseModel):
@@ -252,9 +291,10 @@ class LabStep(BaseModel):
     title: str
     description: str
     instructions: str
-    expected_outcome: str
+    code_template: str = ""
+    expected_output: str = ""
     hints: List[str] = []
-    order: int = 0
+    order: int
 
 class LabCreate(BaseModel):
     title: str
@@ -269,7 +309,7 @@ class LabCreate(BaseModel):
     steps: List[LabStep] = []
     prerequisites: List[str] = []
     skills_gained: List[str] = []
-    is_published: bool = False
+    validation_type: str = "manual" # manual, code_match, output_match
 
 class Lab(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -286,7 +326,9 @@ class Lab(BaseModel):
     steps: List[LabStep]
     prerequisites: List[str]
     skills_gained: List[str]
+    validation_type: str = "manual"
     is_published: bool
+    is_interactive: bool = True
     completions_count: int = 0
     created_at: str
     created_by: Optional[str] = None
@@ -612,7 +654,8 @@ async def check_and_issue_certificate(user_id: str, course_id: str) -> Optional[
 # ============== AUTH ROUTES ==============
 
 @api_router.post("/auth/signup")
-async def signup(user_data: UserCreate):
+@limiter.limit("5/minute")
+async def signup(request: Request, user_data: UserCreate):
     existing = await db.users.find_one({"email": user_data.email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -650,7 +693,8 @@ async def signup(user_data: UserCreate):
     }
 
 @api_router.post("/auth/login")
-async def login(credentials: UserLogin):
+@limiter.limit("10/minute")
+async def login(request: Request, credentials: UserLogin):
     user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -662,12 +706,34 @@ async def login(credentials: UserLogin):
     
     return {
         "token": token,
+        "token_type": "bearer",
         "user": {
             "id": user["id"],
             "email": user["email"],
             "first_name": user["first_name"],
             "last_name": user["last_name"],
             "role": user["role"]
+        }
+    }
+
+@api_router.post("/auth/refresh")
+@limiter.limit("5/minute")
+async def refresh_token(request: Request, current_user: dict = Depends(get_current_user)):
+    """
+    Refresh authentication token for an active session.
+    Requires a valid (non-expired) token to issue a new one.
+    """
+    new_token = create_token(current_user["id"], current_user.get("role", "learner"))
+    
+    return {
+        "token": new_token,
+        "token_type": "bearer",
+        "user": {
+            "id": current_user["id"],
+            "email": current_user["email"],
+            "first_name": current_user["first_name"],
+            "last_name": current_user["last_name"],
+            "role": current_user["role"]
         }
     }
 
@@ -755,6 +821,48 @@ async def get_workshop(workshop_id: str, user: dict = Depends(get_optional_user)
         await log_access(user["id"], "workshop", workshop_id, "view")
     
     return workshop
+
+@api_router.post("/workshops/{workshop_id}/register")
+async def register_for_workshop(workshop_id: str, user: dict = Depends(get_current_user)):
+    workshop = await db.workshops.find_one({"id": workshop_id})
+    if not workshop:
+        raise HTTPException(status_code=404, detail="Workshop not found")
+    
+    if not workshop.get("is_active", False):
+        raise HTTPException(status_code=400, detail="Workshop is not active")
+    
+    # Check capacity
+    max_participants = workshop.get("max_participants", 500)
+    if workshop.get("registered_count", 0) >= max_participants:
+        raise HTTPException(status_code=400, detail="Workshop is full")
+    
+    # Check if already registered
+    existing = await db.workshop_registrations.find_one({
+        "workshop_id": workshop_id,
+        "user_id": user["id"]
+    })
+    if existing:
+        raise HTTPException(status_code=400, detail="Already registered for this workshop")
+    
+    # Register user
+    now = datetime.now(timezone.utc).isoformat()
+    registration = {
+        "id": str(uuid.uuid4()),
+        "workshop_id": workshop_id,
+        "user_id": user["id"],
+        "registered_at": now
+    }
+    await db.workshop_registrations.insert_one(registration)
+    
+    # Increment registered count
+    await db.workshops.update_one(
+        {"id": workshop_id},
+        {"$inc": {"registered_count": 1}}
+    )
+    
+    await log_access(user["id"], "workshop", workshop_id, "register")
+    
+    return {"message": "Successfully registered for workshop", "registration_id": registration["id"]}
 
 @api_router.post("/trainer/workshops")
 async def trainer_create_workshop(workshop_data: WorkshopCreate, user: dict = Depends(require_trainer_or_admin)):
@@ -1059,6 +1167,7 @@ async def upload_image(
     if file.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: JPEG, PNG, WebP, GIF")
     
+    # Check file size
     file.file.seek(0, 2)
     size = file.file.tell()
     file.file.seek(0)
@@ -1066,23 +1175,13 @@ async def upload_image(
     if size > MAX_IMAGE_SIZE:
         raise HTTPException(status_code=400, detail=f"File too large. Max size: {MAX_IMAGE_SIZE // (1024*1024)}MB")
     
-    ext = Path(file.filename).suffix
-    unique_name = f"{uuid.uuid4()}{ext}"
-    file_path = UPLOAD_DIR / "images" / unique_name
-    
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
-    file_url = f"/uploads/images/{unique_name}"
-    
-    logger.info(f"Image uploaded: {file_url} by user {user['id']}")
-    
-    return {
-        "url": file_url,
-        "filename": file.filename,
-        "size": size,
-        "content_type": file.content_type
-    }
+    try:
+        result = await storage_service.upload_file(file, "images")
+        logger.info(f"Image uploaded: {result['url']} by user {user['id']}")
+        return result
+    except Exception as e:
+        logger.error(f"Upload failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="File upload failed")
 
 @api_router.post("/upload/video")
 async def upload_video(
@@ -1101,25 +1200,13 @@ async def upload_video(
     if size > MAX_VIDEO_SIZE:
         raise HTTPException(status_code=400, detail=f"File too large. Max size: {MAX_VIDEO_SIZE // (1024*1024)}MB")
     
-    # Generate unique filename
-    ext = Path(file.filename).suffix
-    unique_name = f"{uuid.uuid4()}{ext}"
-    file_path = UPLOAD_DIR / "videos" / unique_name
-    
-    # Save file
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
-    file_url = f"/uploads/videos/{unique_name}"
-    
-    logger.info(f"Video uploaded: {file_url} by user {user['id']}")
-    
-    return {
-        "url": file_url,
-        "filename": file.filename,
-        "size": size,
-        "content_type": file.content_type
-    }
+    try:
+        result = await storage_service.upload_file(file, "videos")
+        logger.info(f"Video uploaded: {result['url']} by user {user['id']}")
+        return result
+    except Exception as e:
+        logger.error(f"Upload failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="File upload failed")
 
 @api_router.post("/upload/document")
 async def upload_document(
@@ -1137,21 +1224,13 @@ async def upload_document(
     if size > MAX_DOC_SIZE:
         raise HTTPException(status_code=400, detail=f"File too large. Max size: {MAX_DOC_SIZE // (1024*1024)}MB")
     
-    ext = Path(file.filename).suffix
-    unique_name = f"{uuid.uuid4()}{ext}"
-    file_path = UPLOAD_DIR / "documents" / unique_name
-    
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
-    file_url = f"/uploads/documents/{unique_name}"
-    
-    return {
-        "url": file_url,
-        "filename": file.filename,
-        "size": size,
-        "content_type": file.content_type
-    }
+    try:
+        result = await storage_service.upload_file(file, "documents")
+        logger.info(f"Document uploaded: {result['url']} by user {user['id']}")
+        return result
+    except Exception as e:
+        logger.error(f"Upload failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="File upload failed")
 
 # ============== ASSIGNMENT ROUTES ==============
 
@@ -1457,15 +1536,9 @@ async def delete_my_learning_path(path_id: str, user: dict = Depends(get_current
 @api_router.post("/open-source/generate")
 async def generate_learning_path(request: GeneratePathRequest, user: dict = Depends(get_current_user)):
     """Generate an AI-powered learning path for a specific skill - requires login"""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    client = get_openai_client()
     
-    if not EMERGENT_LLM_KEY:
-        raise HTTPException(status_code=500, detail="LLM key not configured")
-    
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"path-gen-{uuid.uuid4()}",
-        system_message="""You are an expert learning path curator. Generate comprehensive learning roadmaps using FREE open-source resources.
+    system_message = """You are an expert learning path curator. Generate comprehensive learning roadmaps using FREE open-source resources.
         
 Your response must be valid JSON with this exact structure:
 {
@@ -1491,7 +1564,6 @@ Your response must be valid JSON with this exact structure:
 }
 
 Use REAL URLs from YouTube, freeCodeCamp, Official docs, GitHub, Medium/Dev.to."""
-    ).with_model("openai", "gpt-5.2")
     
     prompt = f"""Create a detailed learning path for: {request.skill_name}
 Industry context: {request.industry}
@@ -1499,13 +1571,24 @@ Current level: {request.current_level}
 
 Generate a 4-8 week roadmap with specific, real open-source resources."""
     
-    user_message = UserMessage(text=prompt)
-    
     try:
-        response = await chat.send_message(user_message)
+        if not OPENAI_API_KEY or OPENAI_API_KEY == "your_openai_key":
+            raise Exception("OpenAI API key not configured")
+
+        completion = await client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.7
+        )
+        
+        response_text = completion.choices[0].message.content or ""
         
         try:
-            clean_response = response.strip()
+            clean_response = response_text.strip()
             if clean_response.startswith("```json"):
                 clean_response = clean_response[7:]
             if clean_response.startswith("```"):
@@ -1515,12 +1598,62 @@ Generate a 4-8 week roadmap with specific, real open-source resources."""
             
             path_data = json.loads(clean_response.strip())
         except json.JSONDecodeError:
-            path_data = {
-                "description": f"Learning path for {request.skill_name} in {request.industry}",
-                "estimated_weeks": 6,
-                "steps": []
-            }
-        
+            raise Exception("Invalid JSON response from AI")
+            
+    except Exception as e:
+        logger.warning(f"AI generation failed ({str(e)}). Using fallback template.")
+        # Fallback template for when AI is unavailable
+        path_data = {
+            "description": f"Standard learning path for {request.skill_name} in {request.industry} (Generated via Fallback)",
+            "estimated_weeks": 4,
+            "steps": [
+                {
+                    "week": 1,
+                    "title": f"Introduction to {request.skill_name}",
+                    "description": "Core concepts and fundamentals",
+                    "resources": [
+                        {
+                            "title": f"{request.skill_name} Official Documentation",
+                            "url": "https://docs.python.org/3/",
+                            "type": "documentation",
+                            "duration": "2 hours",
+                            "description": "Official guide and reference"
+                        },
+                        {
+                            "title": "Crash Course Video",
+                            "url": "https://www.youtube.com/watch?v=rfscVS0vtbw", # Python crash course example
+                            "type": "video",
+                            "duration": "1 hour",
+                            "description": "Fast-paced introduction"
+                        }
+                    ],
+                    "skills_covered": ["Basics", "Setup", "Syntax"]
+                },
+                {
+                    "week": 2,
+                    "title": "Intermediate Concepts",
+                    "description": "Deep dive into core features",
+                    "resources": [],
+                    "skills_covered": ["Data Structures", "Functions"]
+                },
+                {
+                    "week": 3,
+                    "title": "Advanced Topics",
+                    "description": "Complex patterns and best practices",
+                    "resources": [],
+                    "skills_covered": ["Async/Await", "Decorators"]
+                },
+                {
+                    "week": 4,
+                    "title": "Final Project",
+                    "description": "Build a real-world application",
+                    "resources": [],
+                    "skills_covered": ["Project Management", "Deployment"]
+                }
+            ]
+        }
+
+    try:
         path_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
         
@@ -1533,8 +1666,8 @@ Generate a 4-8 week roadmap with specific, real open-source resources."""
             "estimated_weeks": path_data.get("estimated_weeks", 6),
             "steps": path_data.get("steps", []),
             "created_at": now,
-            "generated_by": "ai",
-            "user_id": user["id"]  # Always store user_id
+            "generated_by": "ai" if "Fallback" not in path_data.get("description", "") else "fallback",
+            "user_id": user["id"]
         }
         
         await db.learning_paths.insert_one(path_doc)
@@ -1546,8 +1679,8 @@ Generate a 4-8 week roadmap with specific, real open-source resources."""
         return path_doc
         
     except Exception as e:
-        logger.error(f"Failed to generate learning path: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate learning path: {str(e)}")
+        logger.error(f"Failed to save learning path: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save learning path: {str(e)}")
 
 # ============== LABS ROUTES ==============
 
@@ -1613,10 +1746,7 @@ class LabExecuteRequest(BaseModel):
 @api_router.post("/labs/execute")
 async def execute_lab_code(request: LabExecuteRequest, user: dict = Depends(get_current_user)):
     """Execute code in the interactive lab environment (LLM-simulated)"""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    
-    if not EMERGENT_LLM_KEY:
-        raise HTTPException(status_code=500, detail="LLM key not configured")
+    client = get_openai_client()
     
     lab = await db.labs.find_one({"id": request.lab_id}, {"_id": 0})
     if not lab:
@@ -1658,20 +1788,23 @@ Respond with a JSON object:
     "hints": ["helpful hint if needed"],
     "step_complete": true/false (whether this step's objective is achieved)
 }}"""
-
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"lab-exec-{user['id']}-{request.lab_id}",
-        system_message=system_prompt
-    ).with_model("openai", "gpt-5.2")
     
     try:
-        user_message = UserMessage(text=f"Execute this {request.execution_type} code:\n```\n{request.code}\n```")
-        response = await chat.send_message(user_message)
+        completion = await client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Execute this {request.execution_type} code:\n```\n{request.code}\n```"}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.5
+        )
+        
+        response_text = completion.choices[0].message.content or ""
         
         # Parse the JSON response
         try:
-            clean_response = response.strip()
+            clean_response = response_text.strip()
             if clean_response.startswith("```json"):
                 clean_response = clean_response[7:]
             if clean_response.startswith("```"):
@@ -1681,10 +1814,9 @@ Respond with a JSON object:
             
             result = json.loads(clean_response.strip())
         except json.JSONDecodeError:
-            # Fallback if JSON parsing fails
             result = {
                 "success": True,
-                "output": response,
+                "output": response_text,
                 "error": None,
                 "hints": [],
                 "step_complete": False
@@ -2054,7 +2186,7 @@ async def admin_delete_learning_path(path_id: str, admin: dict = Depends(require
 
 @api_router.get("/")
 async def root():
-    return {"message": "PluralSkill API is running", "version": "2.0.0"}
+    return {"message": "PluralSkill API is running", "version": "4.0.0"}
 
 @api_router.get("/health")
 async def health():
@@ -2063,10 +2195,17 @@ async def health():
 # Include the router in the main app
 app.include_router(api_router)
 
+# CORS Configuration
+cors_origins_str = os.environ.get('CORS_ORIGINS', 'http://localhost:3000')
+cors_origins = [origin.strip() for origin in cors_origins_str.split(',')]
+
+if '*' in cors_origins:
+    logger.warning("⚠️  CORS is set to allow ALL origins. This is insecure for production!")
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -2105,10 +2244,14 @@ async def seed_data():
             {
                 "id": str(uuid.uuid4()),
                 "title": "AI in Finance: Transforming FP&A with Machine Learning",
+                "slug": "ai-in-finance-fpa-ml",
                 "description": "Learn how leading financial institutions are leveraging AI for forecasting, risk assessment, and automated reporting.",
-                "leader": "Sarah Chen",
-                "company": "Goldman Sachs",
+                "speakers": [
+                    {"name": "Sarah Chen", "title": "VP of AI Strategy", "company": "Goldman Sachs", "linkedin_url": "", "bio": "Leading AI transformation in financial planning"}
+                ],
                 "date": "2026-02-15",
+                "duration_minutes": 90,
+                "platform": "Virtual",
                 "image_url": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800",
                 "recording_url": "",
                 "tags": ["Finance", "AI", "Machine Learning"],
@@ -2121,10 +2264,14 @@ async def seed_data():
             {
                 "id": str(uuid.uuid4()),
                 "title": "Building Data-Driven HR: From Analytics to Action",
+                "slug": "data-driven-hr-analytics",
                 "description": "Industry leaders share how they use people analytics to drive retention and strategic workforce planning.",
-                "leader": "Jennifer Williams",
-                "company": "Microsoft",
+                "speakers": [
+                    {"name": "Jennifer Williams", "title": "Chief People Officer", "company": "Microsoft", "linkedin_url": "", "bio": "Pioneer in people analytics and workforce strategy"}
+                ],
                 "date": "2026-02-22",
+                "duration_minutes": 75,
+                "platform": "Virtual",
                 "image_url": "https://images.unsplash.com/photo-1552664730-d307ca884978?w=800",
                 "recording_url": "",
                 "tags": ["HR", "People Analytics"],
@@ -2137,10 +2284,14 @@ async def seed_data():
             {
                 "id": str(uuid.uuid4()),
                 "title": "Supply Chain Resilience: Lessons from Industry Leaders",
+                "slug": "supply-chain-resilience",
                 "description": "Executives discuss how they built resilient supply chains using data analytics and AI.",
-                "leader": "David Kim",
-                "company": "Amazon",
+                "speakers": [
+                    {"name": "David Kim", "title": "SVP Supply Chain", "company": "Amazon", "linkedin_url": "", "bio": "Leading logistics innovation with data-driven strategies"}
+                ],
                 "date": "2026-03-01",
+                "duration_minutes": 90,
+                "platform": "Virtual",
                 "image_url": "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800",
                 "recording_url": "",
                 "tags": ["Supply Chain", "Operations"],
@@ -2172,9 +2323,9 @@ async def seed_data():
                 "duration_hours": 25,
                 "price": 0,
                 "modules": [
-                    {"id": "m1", "title": "Financial Modeling Fundamentals", "description": "Build your first P&L model", "duration_minutes": 90, "video_url": "", "order": 1},
-                    {"id": "m2", "title": "Cash Flow Forecasting", "description": "Learn to predict and manage cash flows", "duration_minutes": 120, "video_url": "", "order": 2},
-                    {"id": "m3", "title": "Budget Variance Analysis", "description": "Compare actual vs budgeted performance", "duration_minutes": 90, "video_url": "", "order": 3}
+                    {"id": "m1", "title": "Financial Modeling Fundamentals", "description": "Build your first P&L model", "items": [{"title": "Lesson 1", "type": "video", "url": "https://www.youtube.com/embed/dQw4w9WgXcQ", "duration_minutes": 90}], "order": 1},
+                    {"id": "m2", "title": "Cash Flow Forecasting", "description": "Learn to predict and manage cash flows", "items": [{"title": "Lesson 1", "type": "video", "url": "https://www.youtube.com/embed/dQw4w9WgXcQ", "duration_minutes": 120}], "order": 2},
+                    {"id": "m3", "title": "Budget Variance Analysis", "description": "Compare actual vs budgeted performance", "items": [{"title": "Lesson 1", "type": "video", "url": "https://www.youtube.com/embed/dQw4w9WgXcQ", "duration_minutes": 90}], "order": 3}
                 ],
                 "tests": [
                     {"id": "q1", "question": "What is the primary purpose of a P&L statement?", "options": ["Track daily transactions", "Show profitability over a period", "Calculate tax liability", "Record inventory levels"], "correct_answer": 1, "explanation": "A P&L statement shows revenues and expenses over a specific period."},
@@ -2200,8 +2351,8 @@ async def seed_data():
                 "duration_hours": 20,
                 "price": 0,
                 "modules": [
-                    {"id": "m1", "title": "Introduction to HR Analytics", "description": "Overview of HR metrics", "duration_minutes": 60, "video_url": "", "order": 1},
-                    {"id": "m2", "title": "Employee Attrition Analysis", "description": "Predict and prevent turnover", "duration_minutes": 90, "video_url": "", "order": 2}
+                    {"id": "m1", "title": "Introduction to HR Analytics", "description": "Overview of HR metrics", "items": [{"title": "Lesson 1", "type": "video", "url": "", "duration_minutes": 60}], "order": 1},
+                    {"id": "m2", "title": "Employee Attrition Analysis", "description": "Predict and prevent turnover", "items": [{"title": "Lesson 1", "type": "video", "url": "", "duration_minutes": 90}], "order": 2}
                 ],
                 "tests": [],
                 "learning_outcomes": ["Analyze HR data", "Build HR dashboards"],
@@ -2224,9 +2375,9 @@ async def seed_data():
                 "duration_hours": 35,
                 "price": 0,
                 "modules": [
-                    {"id": "m1", "title": "Getting Started with Power BI", "description": "Installation and basics", "duration_minutes": 45, "video_url": "", "order": 1},
-                    {"id": "m2", "title": "Data Modeling", "description": "Build star schemas", "duration_minutes": 120, "video_url": "", "order": 2},
-                    {"id": "m3", "title": "DAX Fundamentals", "description": "Essential DAX functions", "duration_minutes": 150, "video_url": "", "order": 3}
+                    {"id": "m1", "title": "Getting Started with Power BI", "description": "Installation and basics", "items": [{"title": "Lesson 1", "type": "video", "url": "", "duration_minutes": 45}], "order": 1},
+                    {"id": "m2", "title": "Data Modeling", "description": "Build star schemas", "items": [{"title": "Lesson 1", "type": "video", "url": "", "duration_minutes": 120}], "order": 2},
+                    {"id": "m3", "title": "DAX Fundamentals", "description": "Essential DAX functions", "items": [{"title": "Lesson 1", "type": "video", "url": "", "duration_minutes": 150}], "order": 3}
                 ],
                 "tests": [],
                 "learning_outcomes": ["Master Power BI", "Write DAX formulas"],
@@ -2266,6 +2417,7 @@ async def seed_data():
                 "skills_gained": ["Pandas", "SQLite", "Data pipelines"],
                 "is_published": True,
                 "is_interactive": True,
+                "validation_type": "output_match",
                 "completions_count": 0,
                 "created_by": admin_id,
                 "created_at": now
@@ -2289,6 +2441,7 @@ async def seed_data():
                 "skills_gained": ["VBA programming", "Excel automation"],
                 "is_published": True,
                 "is_interactive": True,
+                "validation_type": "manual",
                 "completions_count": 0,
                 "created_by": admin_id,
                 "created_at": now
@@ -2313,6 +2466,7 @@ async def seed_data():
                 "skills_gained": ["SQL queries", "Data analysis"],
                 "is_published": True,
                 "is_interactive": True,
+                "validation_type": "code_match",
                 "completions_count": 0,
                 "created_by": admin_id,
                 "created_at": now
@@ -2321,4 +2475,44 @@ async def seed_data():
         await db.labs.insert_many(labs)
         logger.info(f"Seeded {len(labs)} labs")
 
+    # ============== CREATE INDEXES ==============
+    logger.info("Ensuring MongoDB indexes...")
+    try:
+        # Users
+        await db.users.create_index("email", unique=True)
+        await db.users.create_index("role")
+        await db.users.create_index("id", unique=True)
 
+        # Courses
+        await db.courses.create_index("slug", unique=True)
+        await db.courses.create_index("is_published")
+        await db.courses.create_index("category")
+        await db.courses.create_index("id", unique=True)
+
+        # Workshops
+        await db.workshops.create_index("is_active")
+        await db.workshops.create_index("date")
+        await db.workshops.create_index("id", unique=True)
+
+        # Labs
+        await db.labs.create_index("slug", unique=True)
+        await db.labs.create_index("is_published")
+        await db.labs.create_index("id", unique=True)
+
+        # Course progress (compound index for fast lookups)
+        await db.course_progress.create_index([("user_id", 1), ("course_id", 1)], unique=True)
+
+        # Certificates
+        await db.certificates.create_index("certificate_number", unique=True)
+        await db.certificates.create_index("user_id")
+
+        # Workshop registrations
+        await db.workshop_registrations.create_index([("user_id", 1), ("workshop_id", 1)], unique=True)
+
+        # Access logs
+        await db.access_logs.create_index("timestamp")
+        await db.access_logs.create_index("content_type")
+
+        logger.info("MongoDB indexes created successfully")
+    except Exception as e:
+        logger.warning(f"Index creation warning (non-fatal): {e}")

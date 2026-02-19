@@ -19,7 +19,8 @@ const LoginPage = () => {
   const [loading, setLoading] = useState(false);
 
   // Get the page user was trying to access before being redirected to login
-  const from = location.state?.from || '/';
+  const searchParams = new URLSearchParams(location.search);
+  const from = location.state?.from || searchParams.get('redirect') || '/';
 
   React.useEffect(() => {
     if (isAuthenticated) {

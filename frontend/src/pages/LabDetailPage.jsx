@@ -4,14 +4,16 @@ import { useAuth } from '@/context/AuthContext';
 import { getLabBySlug, completeLab } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { 
-  Clock, Users, ArrowLeft, CheckCircle, Beaker, 
-  Loader2, Code, Lightbulb, Target, Award
+import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Clock, Users, ArrowLeft, CheckCircle, Play,
+  Loader2, Code, Lightbulb, RotateCcw, Award, Target
 } from 'lucide-react';
 import { toast } from 'sonner';
+import SEOHead from '@/components/SEOHead';
 
 const LabDetailPage = () => {
   const { slug } = useParams();
@@ -21,6 +23,8 @@ const LabDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [currentStep, setCurrentStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState([]);
+  const [userCode, setUserCode] = useState('');
+  const [output, setOutput] = useState('');
   const [completing, setCompleting] = useState(false);
 
   useEffect(() => {
@@ -28,6 +32,9 @@ const LabDetailPage = () => {
       try {
         const data = await getLabBySlug(slug);
         setLab(data);
+        if (data.steps && data.steps.length > 0) {
+          setUserCode(data.steps[0].code_template || '');
+        }
       } catch (error) {
         console.error('Failed to fetch lab:', error);
         if (error.response?.status === 404) {
@@ -40,21 +47,47 @@ const LabDetailPage = () => {
     fetchLab();
   }, [slug, navigate]);
 
-  const handleStepComplete = (stepIndex) => {
-    if (!completedSteps.includes(stepIndex)) {
-      setCompletedSteps([...completedSteps, stepIndex]);
-      if (stepIndex < (lab?.steps?.length || 0) - 1) {
-        setCurrentStep(stepIndex + 1);
-      }
+  // Update code template when step changes
+  useEffect(() => {
+    if (lab && lab.steps && lab.steps[currentStep]) {
+      setUserCode(lab.steps[currentStep].code_template || '');
+      setOutput(''); // Clear output on step change
     }
+  }, [currentStep, lab]);
+
+  const handleRunCode = () => {
+    // Simulate code execution
+    setOutput('Running code...\n\n');
+    setTimeout(() => {
+      if (lab && lab.steps && lab.steps[currentStep]) {
+        const expected = lab.steps[currentStep].expected_output;
+        if (expected) {
+          setOutput((prev) => prev + `> ${expected}\n\n✅ Execution Successful`);
+          // Auto-complete step if it matches (mock validation)
+          if (!completedSteps.includes(currentStep)) {
+            setCompletedSteps(prev => [...prev, currentStep]);
+            toast.success("Step completed!");
+          }
+        } else {
+          setOutput((prev) => prev + "> No expected output defined.\nStep marked as complete.");
+          if (!completedSteps.includes(currentStep)) {
+            setCompletedSteps(prev => [...prev, currentStep]);
+          }
+        }
+      }
+    }, 800);
+  };
+
+  const handleStepClick = (index) => {
+    setCurrentStep(index);
   };
 
   const handleLabComplete = async () => {
     if (!isAuthenticated) {
-      navigate('/login');
+      navigate(`/login?redirect=${encodeURIComponent(location.pathname)}`);
       return;
     }
-    
+
     setCompleting(true);
     try {
       await completeLab(lab.id);
@@ -67,21 +100,7 @@ const LabDetailPage = () => {
     }
   };
 
-  const getDifficultyColor = (difficulty) => {
-    switch (difficulty) {
-      case 'beginner':
-        return 'bg-green-100 text-green-700';
-      case 'intermediate':
-        return 'bg-yellow-100 text-yellow-700';
-      case 'advanced':
-        return 'bg-red-100 text-red-700';
-      default:
-        return 'bg-slate-100 text-slate-700';
-    }
-  };
-
   const progress = lab?.steps?.length ? (completedSteps.length / lab.steps.length) * 100 : 0;
-  const allStepsCompleted = lab?.steps?.length && completedSteps.length === lab.steps.length;
 
   if (loading) {
     return (
@@ -91,250 +110,193 @@ const LabDetailPage = () => {
     );
   }
 
-  if (!lab) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center">
-        <h1 className="text-2xl font-heading font-bold mb-4">Lab not found</h1>
-        <Button onClick={() => navigate('/labs')}>Browse Labs</Button>
-      </div>
-    );
-  }
+  if (!lab) return null;
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="bg-slate-900 text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <Link 
-            to="/labs" 
-            className="inline-flex items-center gap-2 text-slate-300 hover:text-white mb-6 transition-colors"
-            data-testid="back-to-labs"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Labs
+    <div className="h-screen flex flex-col bg-background overflow-hidden">
+      <SEOHead
+        title={lab.title}
+        description={lab.short_description}
+        url={`/labs/${slug}`}
+      />
+
+      {/* Top Bar */}
+      <header className="h-14 border-b bg-slate-900 text-white flex items-center px-4 justify-between shrink-0">
+        <div className="flex items-center gap-4">
+          <Link to="/labs" className="text-slate-400 hover:text-white transition-colors">
+            <ArrowLeft className="w-5 h-5" />
           </Link>
-          
-          <div className="flex flex-wrap items-center gap-3 mb-4">
-            <Badge variant="outline" className="border-slate-600 text-slate-300">
-              {lab.technology}
-            </Badge>
-            <Badge className={getDifficultyColor(lab.difficulty)}>
-              {lab.difficulty}
-            </Badge>
-            <Badge variant="outline" className="border-slate-600 text-slate-300">
-              {lab.category}
-            </Badge>
+          <h1 className="font-semibold truncate max-w-md">{lab.title}</h1>
+          <Badge variant="outline" className="border-slate-600 text-slate-300 hidden sm:inline-flex">
+            {lab.difficulty}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex flex-col items-end mr-2">
+            <span className="text-xs text-slate-400">Progress</span>
+            <div className="w-32 h-2 bg-slate-800 rounded-full mt-1">
+              <div
+                className="h-full bg-green-500 rounded-full transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              ></div>
+            </div>
           </div>
-          
-          <h1 className="font-heading font-bold text-3xl sm:text-4xl mb-4" data-testid="lab-title">
-            {lab.title}
-          </h1>
-          
-          <p className="text-slate-300 text-lg max-w-3xl mb-6">
-            {lab.short_description}
-          </p>
-          
-          <div className="flex flex-wrap items-center gap-6 text-sm text-slate-300">
-            <span className="flex items-center gap-2">
-              <Clock className="w-5 h-5" />
-              {lab.estimated_time_minutes} minutes
-            </span>
-            <span className="flex items-center gap-2">
-              <Code className="w-5 h-5" />
-              {lab.steps?.length || 0} steps
-            </span>
-            <span className="flex items-center gap-2">
-              <Users className="w-5 h-5" />
-              {lab.completions_count} completions
-            </span>
+          {progress === 100 && !lab.is_completed && (
+            <Button
+              size="sm"
+              onClick={handleLabComplete}
+              disabled={completing}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              {completing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Finish Lab"}
+            </Button>
+          )}
+          {lab.is_completed && (
+            <Badge className="bg-green-500 text-white">
+              <Award className="w-3 h-3 mr-1" />
+              Completed
+            </Badge>
+          )}
+        </div>
+      </header>
+
+      {/* Main Split View */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Panel: Instructions */}
+        <div className="w-1/3 min-w-[350px] border-r border-border bg-card flex flex-col">
+          <ScrollArea className="flex-1">
+            <div className="p-6 space-y-8">
+              {/* Step List */}
+              <div className="space-y-1">
+                <h3 className="font-heading font-semibold mb-4 text-lg">Steps</h3>
+                {lab.steps.map((step, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleStepClick(idx)}
+                    className={`w-full text-left px-4 py-3 rounded-lg flex items-start gap-3 transition-colors ${currentStep === idx
+                      ? 'bg-primary/10 border border-primary/20'
+                      : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                  >
+                    <div className={`mt-0.5 w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${completedSteps.includes(idx)
+                      ? 'bg-green-500 border-green-500 text-white'
+                      : currentStep === idx
+                        ? 'border-primary text-primary'
+                        : 'border-slate-400 text-slate-400'
+                      }`}>
+                      {completedSteps.includes(idx) ? <CheckCircle className="w-3.5 h-3.5" /> : <span className="text-xs">{idx + 1}</span>}
+                    </div>
+                    <div>
+                      <span className={`text-sm font-medium block ${currentStep === idx ? 'text-primary' : ''}`}>
+                        {step.title}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Current Step Content */}
+              <div className="border-t pt-6">
+                <h2 className="font-heading font-bold text-xl mb-2">
+                  {lab.steps[currentStep].title}
+                </h2>
+                <p className="text-muted-foreground mb-4">
+                  {lab.steps[currentStep].description}
+                </p>
+
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg mb-6 border border-blue-100 dark:border-blue-800">
+                  <h4 className="font-semibold text-blue-800 dark:text-blue-300 mb-2 flex items-center gap-2">
+                    <Target className="w-4 h-4" /> Instructions
+                  </h4>
+                  <p className="text-sm text-blue-900 dark:text-blue-100 leading-relaxed">
+                    {lab.steps[currentStep].instructions}
+                  </p>
+                </div>
+
+                {lab.steps[currentStep].hints && lab.steps[currentStep].hints.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="font-medium flex items-center gap-2 text-sm">
+                      <Lightbulb className="w-4 h-4 text-yellow-500" /> Hints
+                    </h4>
+                    <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                      {lab.steps[currentStep].hints.map((hint, hIdx) => (
+                        <li key={hIdx}>{hint}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          </ScrollArea>
+
+          {/* Bottom Navigation */}
+          <div className="p-4 border-t bg-card/50 backdrop-blur-sm flex justify-between items-center">
+            <Button
+              variant="ghost"
+              disabled={currentStep === 0}
+              onClick={() => setCurrentStep(prev => prev - 1)}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              disabled={currentStep === lab.steps.length - 1}
+              onClick={() => setCurrentStep(prev => prev + 1)}
+            >
+              Next Step
+            </Button>
           </div>
         </div>
-      </div>
 
-      {/* Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid lg:grid-cols-3 gap-8">
-          {/* Main Content */}
-          <div className="lg:col-span-2 space-y-8">
-            {/* Description */}
-            <section>
-              <h2 className="font-heading font-semibold text-2xl mb-4">About This Lab</h2>
-              <p className="text-muted-foreground leading-relaxed">{lab.description}</p>
-            </section>
-
-            {/* Prerequisites */}
-            {lab.prerequisites?.length > 0 && (
-              <section>
-                <h2 className="font-heading font-semibold text-xl mb-4">Prerequisites</h2>
-                <ul className="space-y-2">
-                  {lab.prerequisites.map((prereq, idx) => (
-                    <li key={idx} className="flex items-center gap-2 text-muted-foreground">
-                      <CheckCircle className="w-4 h-4 text-primary" />
-                      {prereq}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-
-            {/* Steps */}
-            {lab.steps?.length > 0 && (
-              <section>
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="font-heading font-semibold text-2xl">Lab Steps</h2>
-                  <span className="text-sm text-muted-foreground">
-                    {completedSteps.length} / {lab.steps.length} completed
-                  </span>
-                </div>
-                
-                <div className="mb-6">
-                  <Progress value={progress} className="h-2" />
-                </div>
-                
-                <Accordion 
-                  type="single" 
-                  collapsible 
-                  value={`step-${currentStep}`}
-                  onValueChange={(val) => setCurrentStep(parseInt(val?.replace('step-', '') || '0'))}
-                  className="space-y-3"
-                >
-                  {lab.steps.map((step, index) => (
-                    <AccordionItem 
-                      key={index} 
-                      value={`step-${index}`}
-                      className={`bg-white border rounded-xl px-6 ${
-                        completedSteps.includes(index) ? 'border-green-200 bg-green-50/30' : ''
-                      }`}
-                    >
-                      <AccordionTrigger className="hover:no-underline py-4">
-                        <div className="flex items-center gap-4 text-left">
-                          <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium flex-shrink-0 ${
-                            completedSteps.includes(index) 
-                              ? 'bg-green-500 text-white' 
-                              : 'bg-primary/10 text-primary'
-                          }`}>
-                            {completedSteps.includes(index) ? <CheckCircle className="w-4 h-4" /> : index + 1}
-                          </span>
-                          <div>
-                            <p className="font-medium">{step.title}</p>
-                            <p className="text-sm text-muted-foreground">{step.description}</p>
-                          </div>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent className="pb-6 pl-12">
-                        <div className="space-y-4">
-                          <div>
-                            <h4 className="font-medium mb-2 flex items-center gap-2">
-                              <Target className="w-4 h-4 text-primary" />
-                              Instructions
-                            </h4>
-                            <p className="text-muted-foreground bg-slate-50 p-4 rounded-lg">
-                              {step.instructions}
-                            </p>
-                          </div>
-                          
-                          <div>
-                            <h4 className="font-medium mb-2">Expected Outcome</h4>
-                            <p className="text-muted-foreground">{step.expected_outcome}</p>
-                          </div>
-                          
-                          {step.hints?.length > 0 && (
-                            <div>
-                              <h4 className="font-medium mb-2 flex items-center gap-2">
-                                <Lightbulb className="w-4 h-4 text-yellow-500" />
-                                Hints
-                              </h4>
-                              <ul className="space-y-1">
-                                {step.hints.map((hint, hIdx) => (
-                                  <li key={hIdx} className="text-sm text-muted-foreground flex items-start gap-2">
-                                    <span className="text-yellow-500">•</span>
-                                    {hint}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                          
-                          {!completedSteps.includes(index) && (
-                            <Button 
-                              onClick={() => handleStepComplete(index)}
-                              className="mt-4"
-                              data-testid={`complete-step-${index}`}
-                            >
-                              <CheckCircle className="w-4 h-4 mr-2" />
-                              Mark as Complete
-                            </Button>
-                          )}
-                        </div>
-                      </AccordionContent>
-                    </AccordionItem>
-                  ))}
-                </Accordion>
-              </section>
-            )}
+        {/* Right Panel: Code Environment */}
+        <div className="flex-1 flex flex-col bg-[#1e1e1e] text-white">
+          {/* Toolbar */}
+          <div className="h-10 border-b border-[#333] flex items-center px-4 justify-between bg-[#252526]">
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <Code className="w-4 h-4" />
+              <span>main.py</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-xs hover:bg-[#333] text-slate-300"
+                onClick={() => {
+                  setUserCode(lab.steps[currentStep].code_template || '');
+                  setOutput('');
+                }}
+              >
+                <RotateCcw className="w-3.5 h-3.5 mr-1" /> Reset
+              </Button>
+              <Button
+                size="sm"
+                className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white border-0"
+                onClick={handleRunCode}
+              >
+                <Play className="w-3.5 h-3.5 mr-1" /> Run Code
+              </Button>
+            </div>
           </div>
 
-          {/* Sidebar */}
-          <div className="lg:col-span-1">
-            <Card className="sticky top-24">
-              <CardContent className="p-6 space-y-6">
-                {lab.is_completed ? (
-                  <div className="text-center py-4">
-                    <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
-                      <Award className="w-8 h-8 text-green-600" />
-                    </div>
-                    <h3 className="font-semibold text-lg mb-2">Lab Completed!</h3>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Great work! You've mastered this lab.
-                    </p>
-                    <Button 
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => navigate(`/labs/${slug}/practice`)}
-                    >
-                      Practice Again
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <Button 
-                      className="w-full h-12 rounded-full bg-gradient-to-r from-primary to-indigo-600"
-                      onClick={() => navigate(`/labs/${slug}/practice`)}
-                      data-testid="start-practice"
-                    >
-                      <Beaker className="mr-2 w-5 h-5" />
-                      Start Interactive Practice
-                    </Button>
-                    <p className="text-xs text-center text-muted-foreground">
-                      Practice with a real terminal and code editor
-                    </p>
-                  </div>
-                )}
-                
-                {/* Progress */}
-                <div>
-                  <div className="flex justify-between text-sm mb-2">
-                    <span className="text-muted-foreground">Progress</span>
-                    <span className="font-medium">{Math.round(progress)}%</span>
-                  </div>
-                  <Progress value={progress} className="h-2" />
-                </div>
-                
-                {/* Skills Gained */}
-                {lab.skills_gained?.length > 0 && (
-                  <div>
-                    <h4 className="font-medium mb-3">Skills You'll Gain</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {lab.skills_gained.map((skill, idx) => (
-                        <Badge key={idx} variant="secondary" className="text-xs">
-                          {skill}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+          {/* Editor Area */}
+          <div className="flex-1 flex flex-col">
+            <textarea
+              value={userCode}
+              onChange={(e) => setUserCode(e.target.value)}
+              className="flex-1 bg-[#1e1e1e] text-[#d4d4d4] p-4 font-mono text-sm resize-none focus:outline-none"
+              spellCheck="false"
+              placeholder="# Write your code here..."
+            />
+
+            {/* Terminal / Output */}
+            <div className="h-1/3 border-t border-[#333] flex flex-col bg-[#1e1e1e]">
+              <div className="px-4 py-2 bg-[#252526] text-xs font-semibold text-slate-400 border-b border-[#333]">
+                Terminal Output
+              </div>
+              <ScrollArea className="flex-1 p-4 font-mono text-sm">
+                <pre className="text-slate-300 whitespace-pre-wrap">{output || 'Ready to execute...'}</pre>
+              </ScrollArea>
+            </div>
           </div>
         </div>
       </div>

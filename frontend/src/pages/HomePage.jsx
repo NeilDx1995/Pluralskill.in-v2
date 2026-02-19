@@ -7,11 +7,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { 
-  ArrowRight, GraduationCap, Users, BookOpen, Award, 
+import {
+  ArrowRight, GraduationCap, Users, BookOpen, Award,
   Calendar, Clock, Sparkles, Target, Zap, CheckCircle2,
   Play, Linkedin, Building2, Code, Beaker, Route, ExternalLink
 } from 'lucide-react';
+import SEOHead from '@/components/SEOHead';
 
 const HomePage = () => {
   const { isAuthenticated, user } = useAuth();
@@ -53,6 +54,10 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
 
   return (
     <div className="min-h-screen">
+      <SEOHead
+        title="Home"
+        description="Master job-ready skills with hands-on labs, workshops, and expert-led courses in AI, Data Science, and more."
+      />
       {/* Hero Section */}
       <section className="relative overflow-hidden bg-gradient-to-br from-indigo-50 via-white to-lime-50 py-20 lg:py-28">
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiM0MzM4Y2EiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
@@ -70,8 +75,8 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
                 PluralSkill offers interactive, real-world learning experiences. Expert-led workshops, hands-on labs, and industry-focused courses to get you job-ready.
               </p>
               <div className="flex flex-col sm:flex-row gap-4">
-                <Button 
-                  size="lg" 
+                <Button
+                  size="lg"
                   className="rounded-full bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25 hover:shadow-xl hover:shadow-primary/30 transition-all hover:scale-105"
                   onClick={() => navigate('/signup')}
                   data-testid="hero-get-started"
@@ -79,9 +84,9 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
                   Get Started Free
                   <ArrowRight className="ml-2 w-5 h-5" />
                 </Button>
-                <Button 
-                  size="lg" 
-                  variant="outline" 
+                <Button
+                  size="lg"
+                  variant="outline"
                   className="rounded-full"
                   onClick={() => navigate('/courses')}
                   data-testid="hero-explore"
@@ -124,7 +129,7 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
               Join free live workshops featuring industry leaders and guest speakers from top organizations.
             </p>
           </div>
-          
+
           {loading ? (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {[1, 2, 3].map((i) => (
@@ -145,15 +150,15 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
                         {workshop.duration_minutes} min
                       </span>
                     </div>
-                    
+
                     <h3 className="font-heading font-semibold text-lg mb-3 line-clamp-2 group-hover:text-primary transition-colors">
                       {workshop.title}
                     </h3>
-                    
+
                     <p className="text-muted-foreground text-sm mb-4 line-clamp-2">
                       {workshop.description}
                     </p>
-                    
+
                     {/* Speakers */}
                     <div className="space-y-3 mb-4">
                       {workshop.speakers?.slice(0, 2).map((speaker, idx) => (
@@ -171,8 +176,8 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
                             </p>
                           </div>
                           {speaker.company_logo && (
-                            <img 
-                              src={speaker.company_logo} 
+                            <img
+                              src={speaker.company_logo}
                               alt={speaker.company}
                               className="w-6 h-6 object-contain grayscale opacity-60"
                             />
@@ -180,7 +185,7 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
                         </div>
                       ))}
                     </div>
-                    
+
                     {/* Tags */}
                     <div className="flex flex-wrap gap-1 mb-4">
                       {workshop.tags?.slice(0, 3).map((tag, idx) => (
@@ -189,12 +194,12 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
                         </Badge>
                       ))}
                     </div>
-                    
+
                     <div className="flex items-center justify-between pt-4 border-t">
                       <div className="flex items-center gap-2 text-sm">
                         <Calendar className="w-4 h-4 text-primary" />
-                        {new Date(workshop.date).toLocaleDateString('en-US', { 
-                          month: 'short', 
+                        {new Date(workshop.date).toLocaleDateString('en-US', {
+                          month: 'short',
                           day: 'numeric',
                           hour: '2-digit',
                           minute: '2-digit'
@@ -224,7 +229,7 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
               <p className="text-muted-foreground text-lg mb-8">
                 Want to learn an industry-specific skill? Our AI creates personalized roadmaps using the best free resources from YouTube, GitHub, documentation, and more.
               </p>
-              
+
               <div className="space-y-4 mb-8">
                 {[
                   { icon: Route, text: 'AI-generated learning roadmaps tailored to your goals' },
@@ -239,8 +244,8 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
                   </div>
                 ))}
               </div>
-              
-              <Button 
+
+              <Button
                 className="rounded-full"
                 onClick={() => navigate('/open-source')}
                 data-testid="explore-open-source"
@@ -249,7 +254,7 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
                 <ArrowRight className="ml-2 w-4 h-4" />
               </Button>
             </div>
-            
+
             <div className="relative">
               <Card className="bg-white border-slate-100 shadow-xl">
                 <CardContent className="p-6">
@@ -262,7 +267,7 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
                       <p className="text-sm text-muted-foreground">6-week roadmap</p>
                     </div>
                   </div>
-                  
+
                   <div className="space-y-3">
                     {[
                       { week: 1, title: 'Python Fundamentals', resources: 'freeCodeCamp, Python Docs' },
@@ -301,8 +306,8 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
                 Industry-focused courses with videos, projects, and assessments
               </p>
             </div>
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               className="hidden sm:flex items-center gap-2"
               onClick={() => navigate('/courses')}
               data-testid="view-all-courses"
@@ -310,7 +315,7 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
               View All <ArrowRight className="w-4 h-4" />
             </Button>
           </div>
-          
+
           {loading ? (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {[1, 2, 3].map((i) => (
@@ -324,7 +329,7 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
               ))}
             </div>
           )}
-          
+
           <div className="sm:hidden mt-8 text-center">
             <Button onClick={() => navigate('/courses')}>View All Courses</Button>
           </div>
@@ -343,7 +348,7 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
               <p className="text-slate-300 text-lg mb-8">
                 Go beyond theory with simulation-based learning. Build real projects, experience deployment lifecycles, and master skills through guided practice.
               </p>
-              
+
               <div className="grid sm:grid-cols-2 gap-4 mb-8">
                 {[
                   { icon: Beaker, title: 'Simulated Environments', desc: 'Risk-free practice' },
@@ -360,8 +365,8 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
                   </div>
                 ))}
               </div>
-              
-              <Button 
+
+              <Button
                 className="rounded-full bg-secondary text-secondary-foreground hover:bg-secondary/90"
                 onClick={() => navigate('/labs')}
                 data-testid="explore-labs"
@@ -370,11 +375,11 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
                 <ArrowRight className="ml-2 w-4 h-4" />
               </Button>
             </div>
-            
+
             <div className="space-y-4">
               {labs.slice(0, 3).map((lab) => (
-                <Link 
-                  key={lab.id} 
+                <Link
+                  key={lab.id}
                   to={`/labs/${lab.slug}`}
                   className="block p-5 rounded-xl bg-white/5 backdrop-blur border border-white/10 hover:bg-white/10 transition-colors group"
                 >
@@ -384,11 +389,10 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
                         <Badge variant="outline" className="text-slate-300 border-slate-600 text-xs">
                           {lab.technology}
                         </Badge>
-                        <Badge className={`text-xs ${
-                          lab.difficulty === 'beginner' ? 'bg-green-500/20 text-green-300' :
-                          lab.difficulty === 'intermediate' ? 'bg-yellow-500/20 text-yellow-300' :
-                          'bg-red-500/20 text-red-300'
-                        }`}>
+                        <Badge className={`text-xs ${lab.difficulty === 'beginner' ? 'bg-green-500/20 text-green-300' :
+                            lab.difficulty === 'intermediate' ? 'bg-yellow-500/20 text-yellow-300' :
+                              'bg-red-500/20 text-red-300'
+                          }`}>
                           {lab.difficulty}
                         </Badge>
                       </div>
@@ -470,8 +474,8 @@ const MarketingHomePage = ({ courses, workshops, labs, loading }) => {
           <p className="text-xl text-white/80 mb-8 max-w-2xl mx-auto">
             Join thousands of learners who have advanced their careers with PluralSkill.
           </p>
-          <Button 
-            size="lg" 
+          <Button
+            size="lg"
             className="rounded-full bg-white text-primary hover:bg-white/90 shadow-xl hover:scale-105 transition-all"
             onClick={() => navigate('/signup')}
             data-testid="cta-signup"
@@ -656,11 +660,10 @@ const LoggedInDashboard = ({ user, courses, workshops, labs, loading }) => {
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
                             <Badge variant="outline" className="text-xs">{lab.technology}</Badge>
-                            <Badge className={`text-xs ${
-                              lab.difficulty === 'beginner' ? 'bg-green-100 text-green-700' :
-                              lab.difficulty === 'intermediate' ? 'bg-yellow-100 text-yellow-700' :
-                              'bg-red-100 text-red-700'
-                            }`}>
+                            <Badge className={`text-xs ${lab.difficulty === 'beginner' ? 'bg-green-100 text-green-700' :
+                                lab.difficulty === 'intermediate' ? 'bg-yellow-100 text-yellow-700' :
+                                  'bg-red-100 text-red-700'
+                              }`}>
                               {lab.difficulty}
                             </Badge>
                           </div>

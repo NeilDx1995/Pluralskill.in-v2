@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { getLabs } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { CardGridSkeleton } from '@/components/LoadingSkeleton';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import {
@@ -13,6 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Search, Beaker, Clock, Users, ArrowRight, Code, X } from 'lucide-react';
+import SEOHead from '@/components/SEOHead';
 
 const LabsPage = () => {
   const navigate = useNavigate();
@@ -27,8 +29,9 @@ const LabsPage = () => {
     const fetchLabs = async () => {
       try {
         const data = await getLabs();
-        setLabs(data);
-        setFilteredLabs(data);
+        const items = data.items || data;
+        setLabs(items);
+        setFilteredLabs(items);
       } catch (error) {
         console.error('Failed to fetch labs:', error);
       } finally {
@@ -88,6 +91,11 @@ const LabsPage = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEOHead
+        title="Interactive Labs"
+        description="Gain practical experience with our hands-on simulation labs. Build real-world projects in a risk-free environment."
+        url="/labs"
+      />
       {/* Header */}
       <div className="bg-slate-900 text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
@@ -167,11 +175,7 @@ const LabsPage = () => {
         </div>
 
         {loading ? (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div key={i} className="h-64 bg-slate-100 rounded-xl animate-pulse" />
-            ))}
-          </div>
+          <CardGridSkeleton count={6} />
         ) : filteredLabs.length === 0 ? (
           <div className="text-center py-16">
             <Beaker className="w-12 h-12 text-muted-foreground mx-auto mb-4" />

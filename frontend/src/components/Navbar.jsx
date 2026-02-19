@@ -32,6 +32,7 @@ const Navbar = () => {
 
   const navLinks = [
     { to: '/courses', label: 'Courses', icon: BookOpen },
+    { to: '/workshops', label: 'Workshops', icon: Presentation },
     { to: '/labs', label: 'Labs', icon: Beaker },
     { to: '/open-source', label: 'Open Source', icon: Route },
     ...(isAuthenticated ? [{ to: '/my-courses', label: 'My Learning', icon: GraduationCap }] : []),
@@ -60,11 +61,10 @@ const Navbar = () => {
                 key={link.to}
                 to={link.to}
                 data-testid={`nav-${link.label.toLowerCase().replace(' ', '-')}`}
-                className={`flex items-center gap-2 text-sm font-medium transition-colors ${
-                  isActive(link.to)
+                className={`flex items-center gap-2 text-sm font-medium transition-colors ${isActive(link.to)
                     ? 'text-primary'
                     : 'text-muted-foreground hover:text-foreground'
-                }`}
+                  }`}
               >
                 <link.icon className="w-4 h-4" />
                 {link.label}
@@ -205,11 +205,10 @@ const Navbar = () => {
                   key={link.to}
                   to={link.to}
                   onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-lg ${
-                    isActive(link.to)
+                  className={`flex items-center gap-3 px-4 py-3 rounded-lg ${isActive(link.to)
                       ? 'bg-primary/10 text-primary'
                       : 'hover:bg-muted'
-                  }`}
+                    }`}
                 >
                   <link.icon className="w-5 h-5" />
                   {link.label}
