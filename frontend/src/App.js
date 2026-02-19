@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from '@/context/AuthContext';
 import { Toaster } from '@/components/ui/sonner';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import PageTransition from '@/components/PageTransition';
 import Navbar from '@/components/Navbar';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import HomePage from '@/pages/HomePage';
@@ -28,13 +29,13 @@ import '@/App.css';
 const MainLayout = ({ children }) => (
   <>
     <Navbar />
-    <main>{children}</main>
+    <main><PageTransition>{children}</PageTransition></main>
   </>
 );
 
 // Auth pages without Navbar
 const AuthLayout = ({ children }) => (
-  <main>{children}</main>
+  <main><PageTransition>{children}</PageTransition></main>
 );
 
 function App() {

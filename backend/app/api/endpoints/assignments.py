@@ -87,10 +87,8 @@ async def submit_assignment(
     if assignment["course_id"] not in user.get("enrolled_courses", []):
          raise HTTPException(status_code=403, detail="Not enrolled in this course")
     
-    # Check for existing submission
+    # Check for existing submission — allow resubmission
     existing = await db.submissions.find_one({"assignment_id": assignment_id, "user_id": user["id"]})
-    if existing:
-        raise HTTPException(status_code=400, detail="Assignment already submitted. Contact instructor to resubmit.")
     
     # Save file
     # Ensure directory exists
@@ -106,25 +104,46 @@ async def submit_assignment(
     file_url = f"/uploads/assignments/{unique_name}"
     
     now = datetime.now(timezone.utc).isoformat()
-    submission_doc = {
-        "id": str(uuid.uuid4()),
-        "assignment_id": assignment_id,
-        "user_id": user["id"],
-        "file_url": file_url,
-        "file_name": file.filename,
-        "notes": notes,
-        "submitted_at": now,
-        "grade": None,
-        "feedback": None,
-        "graded_at": None,
-        "graded_by": None
-    }
     
-    await db.submissions.insert_one(submission_doc)
-    if "_id" in submission_doc:
-        del submission_doc["_id"]
-    
-    return submission_doc
+    if existing:
+        # Resubmission: update existing record, reset grade
+        await db.submissions.update_one(
+            {"id": existing["id"]},
+            {"$set": {
+                "file_url": file_url,
+                "file_name": file.filename,
+                "notes": notes,
+                "submitted_at": now,
+                "grade": None,
+                "feedback": None,
+                "graded_at": None,
+                "graded_by": None,
+                "resubmitted": True
+            }}
+        )
+        updated = await db.submissions.find_one({"id": existing["id"]}, {"_id": 0})
+        return updated
+    else:
+        # First submission
+        submission_doc = {
+            "id": str(uuid.uuid4()),
+            "assignment_id": assignment_id,
+            "user_id": user["id"],
+            "file_url": file_url,
+            "file_name": file.filename,
+            "notes": notes,
+            "submitted_at": now,
+            "grade": None,
+            "feedback": None,
+            "graded_at": None,
+            "graded_by": None
+        }
+        
+        await db.submissions.insert_one(submission_doc)
+        if "_id" in submission_doc:
+            del submission_doc["_id"]
+        
+        return submission_doc
 
 @router.get("/assignments/{assignment_id}/submissions")
 async def get_assignment_submissions(assignment_id: str, user: dict = Depends(require_trainer_or_admin)):

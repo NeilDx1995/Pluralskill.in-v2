@@ -30,6 +30,16 @@ export const refreshToken = async () => {
   return response.data;
 };
 
+export const forgotPassword = async (email) => {
+  const response = await axios.post(`${API_URL}/auth/forgot-password`, { email });
+  return response.data;
+};
+
+export const resetPassword = async (token, password) => {
+  const response = await axios.post(`${API_URL}/auth/reset-password`, { token, password });
+  return response.data;
+};
+
 // Workshops
 export const getWorkshops = async ({ activeOnly = true, search, page = 1, limit = 12 } = {}) => {
   const response = await axios.get(`${API_URL}/workshops`, {
